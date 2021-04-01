@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.analysis.AnalysisProtosV2;
 import com.google.devtools.build.lib.analysis.AspectValue;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.ConfiguredTargetValue;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget;
@@ -35,7 +36,6 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.packages.AspectDescriptor;
 import com.google.devtools.build.lib.query2.aquery.AqueryActionFilter;
 import com.google.devtools.build.lib.query2.aquery.AqueryUtils;
-import com.google.devtools.build.lib.skyframe.ConfiguredTargetValue;
 import com.google.devtools.build.lib.util.Pair;
 import java.io.IOException;
 import java.util.HashMap;
@@ -117,7 +117,7 @@ public class ActionGraphDump {
   }
 
   private void dumpSingleAction(ConfiguredTarget configuredTarget, ActionAnalysisMetadata action)
-      throws CommandLineExpansionException, IOException {
+      throws CommandLineExpansionException, InterruptedException, IOException {
 
     // Store the content of param files.
     if (includeParamFiles && (action instanceof ParameterFileWriteAction)) {
@@ -235,7 +235,7 @@ public class ActionGraphDump {
   }
 
   public void dumpAspect(AspectValue aspectValue, ConfiguredTargetValue configuredTargetValue)
-      throws CommandLineExpansionException, IOException {
+      throws CommandLineExpansionException, InterruptedException, IOException {
     ConfiguredTarget configuredTarget = configuredTargetValue.getConfiguredTarget();
     if (!includeInActionGraph(configuredTarget.getLabel().toString())) {
       return;
@@ -246,7 +246,7 @@ public class ActionGraphDump {
   }
 
   public void dumpConfiguredTarget(ConfiguredTargetValue configuredTargetValue)
-      throws CommandLineExpansionException, IOException {
+      throws CommandLineExpansionException, InterruptedException, IOException {
     ConfiguredTarget configuredTarget = configuredTargetValue.getConfiguredTarget();
     if (!includeInActionGraph(configuredTarget.getLabel().toString())) {
       return;

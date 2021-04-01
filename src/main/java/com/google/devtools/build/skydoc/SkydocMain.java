@@ -34,6 +34,7 @@ import com.google.devtools.build.lib.starlarkbuildapi.java.GeneratedExtensionReg
 import com.google.devtools.build.lib.starlarkbuildapi.java.JavaNativeLibraryInfoApi;
 import com.google.devtools.build.lib.starlarkbuildapi.javascript.JsModuleInfoApi;
 import com.google.devtools.build.skydoc.fakebuildapi.FakeApi;
+import com.google.devtools.build.skydoc.fakebuildapi.FakeProviderApi;
 import com.google.devtools.build.skydoc.fakebuildapi.FakeStructApi;
 import com.google.devtools.build.skydoc.rendering.AspectInfoWrapper;
 import com.google.devtools.build.skydoc.rendering.DocstringParseException;
@@ -58,6 +59,9 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
+import net.starlark.java.annot.Param;
+import net.starlark.java.annot.StarlarkBuiltin;
+import net.starlark.java.annot.StarlarkMethod;
 import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Module;
@@ -67,6 +71,8 @@ import net.starlark.java.eval.StarlarkCallable;
 import net.starlark.java.eval.StarlarkFunction;
 import net.starlark.java.eval.StarlarkSemantics;
 import net.starlark.java.eval.StarlarkThread;
+import net.starlark.java.eval.StarlarkValue;
+import net.starlark.java.lib.json.Json;
 import net.starlark.java.syntax.Expression;
 import net.starlark.java.syntax.ExpressionStatement;
 import net.starlark.java.syntax.FileOptions;
@@ -270,7 +276,7 @@ public class SkydocMain {
                 Collectors.toMap(AspectInfoWrapper::getIdentifierFunction, Functions.identity()));
 
     // Sort the globals bindings by name.
-    TreeMap<String, Object> sortedBindings = new TreeMap<>(module.getExportedGlobals());
+    TreeMap<String, Object> sortedBindings = new TreeMap<>(module.getGlobals());
 
     for (Entry<String, Object> envEntry : sortedBindings.entrySet()) {
       if (ruleFunctions.containsKey(envEntry.getValue())) {
@@ -416,11 +422,18 @@ public class SkydocMain {
       StarlarkThread thread = new StarlarkThread(mu, semantics);
       // We use the default print handler, which writes to stderr.
       thread.setLoader(imports::get);
+      // Fake Bazel's "export" hack, by which provider symbols
+      // bound to global variables take on the name of the global variable.
+      thread.setPostAssignHook(
+          (name, value) -> {
+            if (value instanceof FakeProviderApi) {
+              ((FakeProviderApi) value).setName(name);
+            }
+          });
 
       Starlark.execFileProgram(prog, module, thread);
-    } catch (EvalException | InterruptedException ex) {
-      // This exception class seems a bit unnecessary. Replace with EvalException?
-      throw new StarlarkEvaluationException("Starlark evaluation error", ex);
+    } catch (EvalException ex) {
+      throw new StarlarkEvaluationException(ex.getMessageWithStack());
     }
 
     pending.remove(path);
@@ -430,9 +443,9 @@ public class SkydocMain {
 
   private Path pathOfLabel(Label label, StarlarkSemantics semantics) {
     String workspacePrefix = "";
-    if (!label.getWorkspaceRoot(semantics).isEmpty()
+    if (!label.getWorkspaceRootForStarlarkOnly(semantics).isEmpty()
         && !label.getWorkspaceName().equals(workspaceName)) {
-      workspacePrefix = label.getWorkspaceRoot(semantics) + "/";
+      workspacePrefix = label.getWorkspaceRootForStarlarkOnly(semantics) + "/";
     }
 
     return Paths.get(workspacePrefix + label.toPathFragment());
@@ -454,6 +467,8 @@ public class SkydocMain {
 
     // Add dummy declarations that would come from packages.StarlarkLibrary.COMMON
     // were Skydoc allowed to depend on it. See hack for select below.
+    env.put("json", Json.INSTANCE);
+    env.put("proto", new ProtoModule());
     env.put(
         "depset",
         new StarlarkCallable() {
@@ -504,6 +519,17 @@ public class SkydocMain {
     "js_common",
     "pkg_common",
   };
+
+  @StarlarkBuiltin(name = "ProtoModule", doc = "")
+  private static final class ProtoModule implements StarlarkValue {
+    @StarlarkMethod(
+        name = "encode_text",
+        doc = ".",
+        parameters = {@Param(name = "x")})
+    public String encodeText(Object x) {
+      return "";
+    }
+  }
 
   /**
    * A hack to add a number of global symbols which are part of the build API but are otherwise

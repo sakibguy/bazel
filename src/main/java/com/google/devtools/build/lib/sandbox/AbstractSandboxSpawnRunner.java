@@ -197,7 +197,7 @@ abstract class AbstractSandboxSpawnRunner implements SpawnRunner {
           .setStatus(Status.EXECUTION_FAILED)
           .setExitCode(LOCAL_EXEC_ERROR)
           .setFailureMessage(message)
-          .setFailureDetail(createFailureDetail(message, Code.EXECUTION_FAILED))
+          .setFailureDetail(createFailureDetail(message, Code.SUBPROCESS_START_FAILED))
           .build();
     }
 
@@ -266,6 +266,8 @@ abstract class AbstractSandboxSpawnRunner implements SpawnRunner {
                     resourceUsage.getBlockInputOperations());
                 spawnResultBuilder.setNumInvoluntaryContextSwitches(
                     resourceUsage.getInvoluntaryContextSwitches());
+                // The memory usage of the largest child process
+                spawnResultBuilder.setMemoryInKb(resourceUsage.getMaximumResidentSetSize());
               });
     }
 

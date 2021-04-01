@@ -47,7 +47,6 @@ cc_toolchain_suite(
     filegroup(
         name = "osx_tools_" + arch,
         srcs = [
-            ":builtin_include_directory_paths",
             ":cc_wrapper",
             ":libtool",
             ":libtool_check_unique",
@@ -71,7 +70,7 @@ cc_toolchain_suite(
         linker_files = ":osx_tools_" + arch,
         objcopy_files = ":empty",
         strip_files = ":osx_tools_" + arch,
-        supports_param_files = 0,
+        supports_param_files = 1,
         toolchain_config = ":" + (
             arch if arch != "armeabi-v7a" else "stub_armeabi-v7a"
         ),

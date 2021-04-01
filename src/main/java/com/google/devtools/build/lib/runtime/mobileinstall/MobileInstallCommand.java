@@ -39,7 +39,6 @@ import com.google.devtools.build.lib.runtime.CommonCommandOptions;
 import com.google.devtools.build.lib.runtime.ProjectFileSupport;
 import com.google.devtools.build.lib.runtime.commands.BuildCommand;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
-import com.google.devtools.build.lib.server.FailureDetails.Interrupted;
 import com.google.devtools.build.lib.server.FailureDetails.MobileInstall;
 import com.google.devtools.build.lib.server.FailureDetails.MobileInstall.Code;
 import com.google.devtools.build.lib.shell.BadExitStatusException;
@@ -179,15 +178,17 @@ public class MobileInstallCommand implements BlazeCommand {
       }
       List<String> targets =
           ProjectFileSupport.getTargets(env.getRuntime().getProjectFileProvider(), options);
+
       BuildRequest request =
-          BuildRequest.create(
-              this.getClass().getAnnotation(Command.class).name(),
-              options,
-              env.getRuntime().getStartupOptionsProvider(),
-              targets,
-              env.getReporter().getOutErr(),
-              env.getCommandId(),
-              env.getCommandStartTime());
+          BuildRequest.builder()
+              .setCommandName(this.getClass().getAnnotation(Command.class).name())
+              .setId(env.getCommandId())
+              .setOptions(options)
+              .setStartupOptions(env.getRuntime().getStartupOptionsProvider())
+              .setOutErr(env.getReporter().getOutErr())
+              .setTargets(targets)
+              .setStartTimeMillis(env.getCommandStartTime())
+              .build();
       DetailedExitCode detailedExitCode =
           new BuildTool(env).processRequest(request, null).getDetailedExitCode();
       return BlazeCommandResult.detailedExitCode(detailedExitCode);
@@ -207,15 +208,17 @@ public class MobileInstallCommand implements BlazeCommand {
     List<String> runTargetArgs = targetAndArgs.subList(1, targetAndArgs.size());
 
     OutErr outErr = env.getReporter().getOutErr();
+
     BuildRequest request =
-        BuildRequest.create(
-            this.getClass().getAnnotation(Command.class).name(),
-            options,
-            env.getRuntime().getStartupOptionsProvider(),
-            targets,
-            outErr,
-            env.getCommandId(),
-            env.getCommandStartTime());
+        BuildRequest.builder()
+            .setCommandName(this.getClass().getAnnotation(Command.class).name())
+            .setId(env.getCommandId())
+            .setOptions(options)
+            .setStartupOptions(env.getRuntime().getStartupOptionsProvider())
+            .setOutErr(outErr)
+            .setTargets(targets)
+            .setStartTimeMillis(env.getCommandStartTime())
+            .build();
     BuildResult result = new BuildTool(env).processRequest(request, null);
 
     if (!result.getSuccess()) {
@@ -249,9 +252,7 @@ public class MobileInstallCommand implements BlazeCommand {
         env.getSkyframeExecutor()
             .getConfiguration(env.getReporter(), targetToRun.getConfigurationKey());
     cmdLine.add(
-        configuration
-                .getBinFragment(targetToRun.getLabel().getPackageIdentifier().getRepository())
-                .getPathString()
+        configuration.getBinFragment(targetToRun.getLabel().getRepository()).getPathString()
             + "/"
             + targetToRun.getLabel().toPathFragment().getPathString()
             + "_mi/launcher");
@@ -327,8 +328,7 @@ public class MobileInstallCommand implements BlazeCommand {
       return createFailureResult(message, Code.ERROR_RUNNING_PROGRAM);
     } catch (InterruptedException e) {
       return BlazeCommandResult.detailedExitCode(
-          InterruptedFailureDetails.detailedExitCode(
-              "mobile install interrupted", Interrupted.Code.MOBILE_INSTALL_COMMAND));
+          InterruptedFailureDetails.detailedExitCode("mobile install interrupted"));
     }
   }
 

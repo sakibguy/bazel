@@ -22,7 +22,9 @@ import com.google.devtools.build.lib.starlarkbuildapi.FileApi;
 import com.google.devtools.build.lib.starlarkbuildapi.core.ProviderApi;
 import com.google.devtools.build.lib.starlarkbuildapi.core.StructApi;
 import com.google.devtools.build.lib.starlarkbuildapi.cpp.LibraryToLinkApi;
+import com.google.devtools.build.lib.starlarkbuildapi.cpp.LtoBackendArtifactsApi;
 import net.starlark.java.annot.Param;
+import net.starlark.java.annot.ParamType;
 import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.annot.StarlarkMethod;
 import net.starlark.java.eval.EvalException;
@@ -37,7 +39,9 @@ import net.starlark.java.eval.EvalException;
     documented = true,
     category = DocCategory.PROVIDER)
 public interface JavaNativeLibraryInfoApi<
-        FileT extends FileApi, LibraryToLinkT extends LibraryToLinkApi<FileT>>
+        FileT extends FileApi,
+        LtoBackendArtifactsT extends LtoBackendArtifactsApi<FileT>,
+        LibraryToLinkT extends LibraryToLinkApi<FileT, LtoBackendArtifactsT>>
     extends StructApi {
   /** Name of this info object. */
   String NAME = "JavaNativeLibraryInfo";
@@ -58,7 +62,10 @@ public interface JavaNativeLibraryInfoApi<
           "Do not use this module. It is intended for migration purposes only. If you depend on "
               + "it, you will be broken when it is removed.",
       documented = false)
-  interface Provider<FileT extends FileApi, LibraryToLinkT extends LibraryToLinkApi<FileT>>
+  interface Provider<
+          FileT extends FileApi,
+          LtoBackendArtifactsT extends LtoBackendArtifactsApi<FileT>,
+          LibraryToLinkT extends LibraryToLinkApi<FileT, LtoBackendArtifactsT>>
       extends ProviderApi {
 
     @StarlarkMethod(
@@ -72,12 +79,11 @@ public interface JavaNativeLibraryInfoApi<
               doc = "The transitive set of LibraryToLink providers.",
               positional = true,
               named = false,
-              type = Depset.class,
-              generic1 = LibraryToLinkApi.class),
+              allowedTypes = {@ParamType(type = Depset.class, generic1 = LibraryToLinkApi.class)}),
         },
         selfCall = true)
     @StarlarkConstructor
-    JavaNativeLibraryInfoApi<FileT, LibraryToLinkT> create(Depset transitiveLibraries)
-        throws EvalException;
+    JavaNativeLibraryInfoApi<FileT, LtoBackendArtifactsT, LibraryToLinkT> create(
+        Depset transitiveLibraries) throws EvalException;
   }
 }

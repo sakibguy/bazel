@@ -21,6 +21,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultiset;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
 import com.google.common.eventbus.EventBus;
@@ -31,6 +32,7 @@ import com.google.devtools.build.lib.actions.ActionKeyContext;
 import com.google.devtools.build.lib.actions.ActionLookupKey;
 import com.google.devtools.build.lib.actions.ActionLookupValue;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.ArtifactOwner;
 import com.google.devtools.build.lib.analysis.AnalysisOptions;
 import com.google.devtools.build.lib.analysis.AnalysisResult;
 import com.google.devtools.build.lib.analysis.BlazeDirectories;
@@ -42,8 +44,10 @@ import com.google.devtools.build.lib.analysis.ServerDirectories;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
-import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.config.TransitionResolver;
+import com.google.devtools.build.lib.analysis.config.transitions.ConfigurationTransition;
+import com.google.devtools.build.lib.analysis.config.transitions.NoTransition;
 import com.google.devtools.build.lib.analysis.configuredtargets.InputFileConfiguredTarget;
 import com.google.devtools.build.lib.analysis.starlark.StarlarkTransition;
 import com.google.devtools.build.lib.buildtool.BuildRequestOptions;
@@ -52,6 +56,8 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.exec.ExecutionOptions;
 import com.google.devtools.build.lib.packages.NativeAspectClass;
+import com.google.devtools.build.lib.packages.NoSuchPackageException;
+import com.google.devtools.build.lib.packages.NoSuchTargetException;
 import com.google.devtools.build.lib.packages.PackageFactory;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
@@ -80,7 +86,6 @@ import com.google.devtools.build.lib.util.io.TimestampGranularityMonitor;
 import com.google.devtools.build.lib.vfs.ModifiedFileSet;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.Root;
-import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsParser;
 import java.util.Arrays;
@@ -334,12 +339,14 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     Preconditions.checkState(analysisResult != null, "You must run update() first!");
   }
 
-  /**
-   * Update the BuildView: syncs the package cache; loads and analyzes the given labels.
-   */
+  /** Update the BuildView: syncs the package cache; loads and analyzes the given labels. */
   protected AnalysisResult update(
-      EventBus eventBus, FlagBuilder config, ImmutableList<String> aspects, String... labels)
-          throws Exception {
+      EventBus eventBus,
+      FlagBuilder config,
+      ImmutableSet<String> explicitTargetPatterns,
+      ImmutableList<String> aspects,
+      String... labels)
+      throws Exception {
     Set<Flag> flags = config.flags;
 
     LoadingOptions loadingOptions = optionsParser.getOptions(LoadingOptions.class);
@@ -393,6 +400,7 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
             loadingResult,
             buildOptions,
             multiCpu,
+            explicitTargetPatterns,
             aspects,
             viewOptions,
             keepGoing,
@@ -408,9 +416,16 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     return analysisResult;
   }
 
+  protected AnalysisResult update(
+      EventBus eventBus, FlagBuilder config, ImmutableList<String> aspects, String... labels)
+      throws Exception {
+    return update(
+        eventBus, config, /*explicitTargetPatterns=*/ ImmutableSet.<String>of(), aspects, labels);
+  }
+
   protected AnalysisResult update(EventBus eventBus, FlagBuilder config, String... labels)
       throws Exception {
-    return update(eventBus, config, /*aspects=*/ImmutableList.<String>of(), labels);
+    return update(eventBus, config, /*aspects=*/ ImmutableList.<String>of(), labels);
   }
 
   protected AnalysisResult update(FlagBuilder config, String... labels) throws Exception {
@@ -495,11 +510,22 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
       throw new AssertionError(e);
     }
     try {
+      // Need to emulate the activities of the top-level trimming transition since not going
+      // through sufficiently normal evaluation channels.
+      Target target = skyframeExecutor.getPackageManager().getTarget(reporter, parsedLabel);
+      ConfigurationTransition transition =
+          TransitionResolver.evaluateTransition(
+              configuration,
+              NoTransition.INSTANCE,
+              target,
+              ruleClassProvider.getTrimmingTransitionFactory());
       return skyframeExecutor.getConfiguredTargetAndDataForTesting(
-          reporter, parsedLabel, configuration);
+          reporter, parsedLabel, configuration, transition);
     } catch (StarlarkTransition.TransitionException
         | InvalidConfigurationException
-        | InterruptedException e) {
+        | InterruptedException
+        | NoSuchPackageException
+        | NoSuchTargetException e) {
       throw new AssertionError(e);
     }
   }
@@ -550,7 +576,7 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
         .getArtifactFactory()
         .getDerivedArtifact(
             label.getPackageFragment().getRelative(packageRelativePath),
-            getTargetConfiguration().getBinDirectory(label.getPackageIdentifier().getRepository()),
+            getTargetConfiguration().getBinDirectory(label.getRepository()),
             ConfiguredTargetKey.builder()
                 .setConfiguredTarget(owner)
                 .setConfiguration(
@@ -558,8 +584,8 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
                 .build());
   }
 
-  protected Set<SkyKey> getSkyframeEvaluatedTargetKeys() {
-    return buildView.getSkyframeEvaluatedTargetKeysForTesting();
+  protected Set<ActionLookupKey> getSkyframeEvaluatedTargetKeys() {
+    return buildView.getSkyframeEvaluatedActionLookupKeyCountForTesting();
   }
 
   protected void assertNumberOfAnalyzedConfigurationsOfTargets(
@@ -567,7 +593,7 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
     ImmutableMultiset<Label> actualSet =
         getSkyframeEvaluatedTargetKeys().stream()
             .filter(key -> key instanceof ConfiguredTargetKey)
-            .map(key -> ((ConfiguredTargetKey) key).getLabel())
+            .map(ArtifactOwner::getLabel)
             .collect(toImmutableMultiset());
     ImmutableMap<Label, Integer> expected =
         targetsWithCounts.entrySet().stream()
@@ -643,18 +669,5 @@ public abstract class AnalysisTestCase extends FoundationTestCase {
 
     useRuleClassProvider(builder.build());
     update();
-  }
-
-  /**
-   * Makes custom configuration fragments available in tests.
-   */
-  protected final void setConfigFragmentsAvailableInTests(
-      ConfigurationFragmentFactory... factories) throws Exception {
-    ConfiguredRuleClassProvider.Builder builder = new ConfiguredRuleClassProvider.Builder();
-    TestRuleClassProvider.addStandardRules(builder);
-    for (ConfigurationFragmentFactory factory : factories) {
-      builder.addConfigurationFragment(factory);
-    }
-    useRuleClassProvider(builder.build());
   }
 }

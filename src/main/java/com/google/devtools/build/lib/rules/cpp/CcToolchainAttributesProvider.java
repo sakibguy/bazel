@@ -18,7 +18,6 @@ import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Actions;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.Allowlist;
@@ -30,27 +29,28 @@ import com.google.devtools.build.lib.analysis.MiddlemanProvider;
 import com.google.devtools.build.lib.analysis.PackageSpecificationProvider;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
-import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.packages.BuildType;
+import com.google.devtools.build.lib.packages.BuiltinProvider;
+import com.google.devtools.build.lib.packages.Info;
 import com.google.devtools.build.lib.packages.License;
-import com.google.devtools.build.lib.packages.NativeProvider;
+import com.google.devtools.build.lib.packages.NativeInfo;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.cpp.CcToolchain.AdditionalBuildVariablesComputer;
-import net.starlark.java.syntax.Location;
 
 /**
  * Provider encapsulating all the information from the cc_toolchain rule that affects creation of
  * {@link CcToolchainProvider}
  */
-public class CcToolchainAttributesProvider extends ToolchainInfo implements HasCcToolchainLabel {
+// TODO(adonovan): rename s/Provider/Info/.
+public class CcToolchainAttributesProvider extends NativeInfo implements HasCcToolchainLabel {
 
-  public static final NativeProvider<CcToolchainAttributesProvider> PROVIDER =
-      new NativeProvider<CcToolchainAttributesProvider>(
-          CcToolchainAttributesProvider.class, "CcToolchainAttributesInfo") {};
+  public static final BuiltinProvider<CcToolchainAttributesProvider> PROVIDER =
+      new BuiltinProvider<CcToolchainAttributesProvider>(
+          "CcToolchainAttributesInfo", CcToolchainAttributesProvider.class) {};
 
   private final boolean supportsParamFiles;
   private final boolean supportsHeaderParsing;
@@ -69,7 +69,6 @@ public class CcToolchainAttributesProvider extends ToolchainInfo implements HasC
   private final NestedSet<Artifact> libcMiddleman;
   private final TransitiveInfoCollection libcTop;
   private final NestedSet<Artifact> targetLibc;
-  private final NestedSet<Artifact> targetLibcMiddleman;
   private final TransitiveInfoCollection targetLibcTop;
   private final NestedSet<Artifact> fullInputsForCrosstool;
   private final NestedSet<Artifact> fullInputsForLink;
@@ -106,7 +105,7 @@ public class CcToolchainAttributesProvider extends ToolchainInfo implements HasC
       RuleContext ruleContext,
       boolean isAppleToolchain,
       AdditionalBuildVariablesComputer additionalBuildVariablesComputer) {
-    super(ImmutableMap.of(), Location.BUILTIN);
+    super();
     this.ccToolchainLabel = ruleContext.getLabel();
     this.toolchainIdentifier = ruleContext.attributes().get("toolchain_identifier", Type.STRING);
     if (ruleContext.getFragment(CppConfiguration.class).removeCpuCompilerCcToolchainAttributes()
@@ -138,8 +137,6 @@ public class CcToolchainAttributesProvider extends ToolchainInfo implements HasC
     this.libc = getOptionalFiles(ruleContext, CcToolchainRule.LIBC_TOP_ATTR);
     this.libcTop = ruleContext.getPrerequisite(CcToolchainRule.LIBC_TOP_ATTR);
 
-    this.targetLibcMiddleman =
-        getOptionalMiddlemanOrFiles(ruleContext, CcToolchainRule.TARGET_LIBC_TOP_ATTR);
     this.targetLibc = getOptionalFiles(ruleContext, CcToolchainRule.TARGET_LIBC_TOP_ATTR);
     this.targetLibcTop = ruleContext.getPrerequisite(CcToolchainRule.TARGET_LIBC_TOP_ATTR);
 
@@ -221,6 +218,11 @@ public class CcToolchainAttributesProvider extends ToolchainInfo implements HasC
     this.allowlistForLooseHeaderCheck =
         Allowlist.fetchPackageSpecificationProvider(
             ruleContext, CcToolchain.LOOSE_HEADER_CHECK_ALLOWLIST);
+  }
+
+  @Override
+  public BuiltinProvider<CcToolchainAttributesProvider> getProvider() {
+    return PROVIDER;
   }
 
   public String getCpu() {
@@ -470,6 +472,6 @@ public class CcToolchainAttributesProvider extends ToolchainInfo implements HasC
  * CcToolchainProvider}.
  */
 // TODO(b/113849758): Remove once behavior is migrated.
-interface HasCcToolchainLabel {
+interface HasCcToolchainLabel extends Info {
   Label getCcToolchainLabel();
 }

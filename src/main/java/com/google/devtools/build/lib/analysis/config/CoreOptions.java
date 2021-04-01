@@ -367,20 +367,6 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
   public List<Map.Entry<String, String>> hostActionEnvironment;
 
   @Option(
-      name = "repo_env",
-      converter = Converters.OptionalAssignmentConverter.class,
-      allowMultiple = true,
-      defaultValue = "null",
-      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
-      effectTags = {OptionEffectTag.ACTION_COMMAND_LINES},
-      help =
-          "Specifies additional environment variables to be available only for repository rules."
-              + " Note that repository rules see the full environment anyway, but in this way"
-              + " configuration information can be passed to repositories through options without"
-              + " invalidating the action graph.")
-  public List<Map.Entry<String, String>> repositoryEnvironment;
-
-  @Option(
       name = "collect_code_coverage",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
@@ -528,7 +514,9 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
       documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
       effectTags = {OptionEffectTag.EXECUTION},
       metadataTags = {OptionMetadataTag.EXPERIMENTAL},
-      help = "Use action_listener to attach an extra_action to existing build actions.")
+      help =
+          "Deprecated in favor of aspects. Use action_listener to attach an extra_action to"
+              + " existing build actions.")
   public List<Label> actionListeners;
 
   @Option(
@@ -719,7 +707,6 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
 
   @Option(
       name = "enable_runfiles",
-      oldName = "experimental_enable_runfiles",
       defaultValue = "auto",
       documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
       effectTags = {OptionEffectTag.AFFECTS_OUTPUTS},
@@ -743,7 +730,7 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
               + "support execution info, e.g. Genrule, CppCompile, Javac, StarlarkAction, "
               + "TestRunner. When specifying multiple values, order matters because "
               + "many regexes may apply to the same mnemonic.\n\n"
-              + "Syntax: \"regex=[+-]key,[+-]key,...\".\n\n"
+              + "Syntax: \"regex=[+-]key,regex=[+-]key,...\".\n\n"
               + "Examples:\n"
               + "  '.*=+x,.*=-y,.*=+z' adds 'x' and 'z' to, and removes 'y' from, "
               + "the execution info for all actions.\n"
@@ -754,8 +741,42 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
   public ExecutionInfoModifier executionInfoModifier;
 
   @Option(
+      name = "incompatible_genquery_use_graphless_query",
+      defaultValue = "null",
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      expansion = {
+        "--experimental_genquery_use_graphless_query=auto",
+      },
+      effectTags = {
+        OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION,
+        OptionEffectTag.AFFECTS_OUTPUTS,
+        OptionEffectTag.LOADING_AND_ANALYSIS
+      },
+      metadataTags = {
+        OptionMetadataTag.INCOMPATIBLE_CHANGE,
+        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
+      },
+      help = "Use graphless query and disable output ordering for genquery.")
+  public Void incompatibleUseGraphlessQuery;
+
+  @Option(
+      name = "noincompatible_genquery_use_graphless_query",
+      defaultValue = "null",
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      expansion = {
+        "--experimental_genquery_use_graphless_query=false",
+      },
+      effectTags = {
+        OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION,
+        OptionEffectTag.AFFECTS_OUTPUTS,
+        OptionEffectTag.LOADING_AND_ANALYSIS
+      },
+      help = "Do not use graphless query for genquery.")
+  public Void noincompatibleUseGraphlessQuery;
+
+  @Option(
       name = "experimental_genquery_use_graphless_query",
-      defaultValue = "false",
+      defaultValue = "auto",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
       effectTags = {
         OptionEffectTag.BAZEL_INTERNAL_CONFIGURATION,
@@ -833,17 +854,6 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
       help = "Whether to enable the use of AggregatingMiddleman in rules.")
   public boolean enableAggregatingMiddleman;
 
-  // TODO(b/132346407): Remove when all usages are gone.
-  @Option(
-      name = "experimental_enable_flag_alias",
-      defaultValue = "true",
-      documentationCategory = OptionDocumentationCategory.INPUT_STRICTNESS,
-      effectTags = {OptionEffectTag.CHANGES_INPUTS},
-      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
-      help = "When enabled, alternate names can be assigned to Starlark-defined flags.")
-  public boolean enableFlagAlias;
-
-  // TODO(b/132346407): Update docs when the feature is fully implemented
   @Option(
       name = "flag_alias",
       converter = Converters.FlagAliasConverter.class,
@@ -853,19 +863,8 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
       effectTags = {OptionEffectTag.CHANGES_INPUTS},
       help =
           "Sets a shorthand name for a Starlark flag. It takes a single key-value pair in the form"
-              + " \"<key>=<value>\" as an argument. This is an experimental feature and will be"
-              + " ignored unless --experimental_enable_flag_alias is set to true.")
+              + " \"<key>=<value>\" as an argument.")
   public List<Map.Entry<String, String>> commandLineFlagAliases;
-
-  @Option(
-      name = "experimental_send_archived_tree_artifact_inputs",
-      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS, OptionEffectTag.EXECUTION},
-      defaultValue = "false",
-      help =
-          "Send input tree artifacts as a single archived file rather than sending each file in the"
-              + " artifact as a separate input.")
-  public boolean sendArchivedTreeArtifactInputs;
 
   /** Ways configured targets may provide the {@link Fragment}s they require. */
   public enum IncludeConfigFragmentsEnum {
@@ -893,36 +892,6 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
     }
   }
 
-  /** Used to specify which sanitizer is enabled in the current APK split. */
-  public enum FatApkSplitSanitizer {
-    NONE(null, ""),
-    HWASAN("hwasan", "-hwasan");
-
-    private FatApkSplitSanitizer(String feature, String androidLibDirSuffix) {
-      this.feature = feature;
-      this.androidLibDirSuffix = androidLibDirSuffix;
-    }
-
-    public final String feature;
-    public final String androidLibDirSuffix;
-  }
-
-  /** Converter for {@link FatApkSplitSanitizer}. */
-  public static class FatApkSplitSanitizerConverter extends EnumConverter<FatApkSplitSanitizer> {
-    public FatApkSplitSanitizerConverter() {
-      super(FatApkSplitSanitizer.class, "fat apk split sanitizer");
-    }
-  }
-
-  @Option(
-      name = "fat_apk_split_sanitizer",
-      defaultValue = "NONE",
-      effectTags = {OptionEffectTag.CHANGES_INPUTS, OptionEffectTag.AFFECTS_OUTPUTS},
-      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      metadataTags = {OptionMetadataTag.INTERNAL},
-      converter = FatApkSplitSanitizerConverter.class)
-  public FatApkSplitSanitizer fatApkSplitSanitizer;
-
   @Override
   public FragmentOptions getHost() {
     CoreOptions host = (CoreOptions) getDefault();
@@ -943,7 +912,6 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
     host.cpu = hostCpu;
     host.includeRequiredConfigFragmentsProvider = includeRequiredConfigFragmentsProvider;
     host.enableAggregatingMiddleman = enableAggregatingMiddleman;
-    host.sendArchivedTreeArtifactInputs = sendArchivedTreeArtifactInputs;
 
     // === Runfiles ===
     host.buildRunfilesManifests = buildRunfilesManifests;
@@ -976,6 +944,7 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
 
     // Pass host action environment variables
     host.actionEnvironment = hostActionEnvironment;
+    host.hostActionEnvironment = hostActionEnvironment;
 
     return host;
   }

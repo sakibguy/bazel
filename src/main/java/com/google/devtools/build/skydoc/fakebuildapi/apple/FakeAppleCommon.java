@@ -67,37 +67,46 @@ public class FakeAppleCommon
 
   @Override
   public StructApi getPlatformStruct() {
-    return new FakeStructApi();
+    return new FakeStructApi(
+        new ImmutableMap.Builder<String, Object>()
+            .put("ios_device", "ios_device")
+            .put("ios_simulator", "ios_simulator")
+            .put("macos", "macos")
+            .put("tvos_device", "tvos_device")
+            .put("tvos_simulator", "tvos_simulator")
+            .put("watchos_device", "watchos_device")
+            .put("watchos_simulator", "watchos_simulator")
+            .build());
   }
 
   @Override
   public ProviderApi getXcodeVersionPropertiesConstructor() {
-    return new FakeProviderApi();
+    return new FakeProviderApi("XcodeProperties");
   }
 
   @Override
   public ProviderApi getXcodeVersionConfigConstructor() {
-    return new FakeProviderApi();
+    return new FakeProviderApi("XcodeVersionConfig");
   }
 
   @Override
   public ProviderApi getObjcProviderConstructor() {
-    return new FakeProviderApi();
+    return new FakeProviderApi("objc");
   }
 
   @Override
   public ProviderApi getAppleDynamicFrameworkConstructor() {
-    return new FakeProviderApi();
+    return new FakeProviderApi("AppleDynamicFramework");
   }
 
   @Override
   public ProviderApi getAppleDylibBinaryConstructor() {
-    return new FakeProviderApi();
+    return new FakeProviderApi("AppleDylibBinary");
   }
 
   @Override
   public ProviderApi getAppleExecutableBinaryConstructor() {
-    return new FakeProviderApi();
+    return new FakeProviderApi("AppleExecutableBinary");
   }
 
   @Override
@@ -107,12 +116,12 @@ public class FakeAppleCommon
 
   @Override
   public ProviderApi getAppleDebugOutputsConstructor() {
-    return new FakeProviderApi();
+    return new FakeProviderApi("AppleDebugOutputs");
   }
 
   @Override
   public ProviderApi getAppleLoadableBundleBinaryConstructor() {
-    return new FakeProviderApi();
+    return new FakeProviderApi("AppleLoadableBundleBinary");
   }
 
   @Override
@@ -126,6 +135,7 @@ public class FakeAppleCommon
       Sequence<?> extraLinkopts,
       Sequence<?> extraLinkInputs,
       StarlarkInt stamp,
+      Boolean shouldLipo,
       StarlarkThread thread) {
     return new FakeStructApi();
   }

@@ -1,9 +1,10 @@
 ---
 layout: documentation
 title: Configurable build attributes
+category: getting-started
 ---
 
-# Configurable build attributes
+# Configurable Build Attributes
 
 **_Configurable attributes_**, commonly known as [`select()`](
 be/functions.html#select), is a Bazel feature that lets users toggle the values
@@ -114,6 +115,7 @@ genrule(
     srcs = select({
         ":arm_cpu": ["g_arm.src"],
         ":x86_cpu": ["g_x86.src"],
+    }),
     tools = select({
         ":arm_cpu": [":tool1"],
         ":x86_cpu": [":tool2"],
@@ -330,7 +332,7 @@ The platform can be specified on the command line. It activates the
 allowing those `config_setting`s to match in `select()` expressions.
 
 For example, in order to set the `srcs` attribute of `my_rocks` to `calcite.sh`,
-we can simply run
+you can simply run
 
 ```sh
 bazel build //my_app:my_rocks --platforms=//myapp:marble_platform
@@ -453,9 +455,9 @@ For more direct support, use one of the following:
 ### <a name="selects-with-or"></a>`selects.with_or`
 
 The
-[with_or](https://g3doc.corp.google.com/third_party/bazel_skylib/g3doc/selects_doc.md#selectswith-or)
+[with_or](https://github.com/bazelbuild/bazel-skylib/blob/master/docs/selects_doc.md#selectswith_or)
 macro in [Skylib](https://github.com/bazelbuild/bazel-skylib)'s
-[`selects`](https://g3doc.corp.google.com/third_party/bazel_skylib/g3doc/selects_doc.md)
+[`selects`](https://github.com/bazelbuild/bazel-skylib/blob/master/docs/selects_doc.md)
 module supports `OR`ing conditions directly inside a `select`:
 
 ```python
@@ -521,7 +523,6 @@ It's an error for multiple conditions to match unless one is an unambiguous
 If you need a `select` branch to match when multiple conditions match, use the
 [Skylib](https://github.com/bazelbuild/bazel-skylib) macro
 [config_setting_group](https://github.com/bazelbuild/bazel-skylib/blob/master/docs/selects_doc.md#selectsconfig_setting_group):
-```
 
 ```python
 config_setting(
@@ -542,7 +543,7 @@ sh_binary(
     deps = select({
         ":config1_and_2": [":standard_lib"],
         "//conditions:default": [":other_lib"],
-        }),
+    }),
 )
 ```
 
@@ -639,7 +640,7 @@ flags aren't evaluated until later in the build (in the
 [analysis phase](https://docs.bazel.build/versions/master/glossary.html#analysis-phase)).
 So it can't determine which `select()` branches are chosen.
 
-Bazel [`cquery`](cquery.html) opeates after Bazel's analysis phase, so it has
+Bazel [`cquery`](cquery.html) operates after Bazel's analysis phase, so it has
 all this information and can accurately resolve `select()`s.
 
 Consider:
@@ -674,7 +675,7 @@ config_setting(
 )
 ```
 
-`query` overapproximtes `:my_lib`'s dependencies:
+`query` overapproximates `:my_lib`'s dependencies:
 
 ```sh
 $ bazel query 'deps(//myapp:my_lib)'
@@ -772,7 +773,7 @@ type 'select' has no method upper().
 ERROR: error loading package 'myapp': Package 'myapp' contains errors.
 ```
 
-Building succeeds when we comment out `sad_macro`:
+Building succeeds when you comment out `sad_macro`:
 
 ```sh
 # Comment out sad_macro so it doesn't mess up the build.

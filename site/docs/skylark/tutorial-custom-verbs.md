@@ -1,9 +1,10 @@
 ---
 layout: documentation
 title: Using macros to create "custom verbs"
+category: extending
 ---
 
-# Using macros to create "custom verbs"
+# Using Macros to Create "Custom Verbs"
 
 Day-to-day interaction with Bazel happens primarily through a few commands:
 `build`, `test`, and `run`. At times, though, these can feel limited: you may want to

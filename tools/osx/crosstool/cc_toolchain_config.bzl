@@ -1348,7 +1348,7 @@ def _impl(ctx):
             ],
             tools = [
                 tool(
-                    path = "wrapped_clang",
+                    path = "wrapped_clang_pp",
                     execution_requirements = xcode_execution_requirements,
                 ),
             ],
@@ -1383,7 +1383,7 @@ def _impl(ctx):
             ],
             tools = [
                 tool(
-                    path = "wrapped_clang",
+                    path = "wrapped_clang_pp",
                     execution_requirements = xcode_execution_requirements,
                 ),
             ],
@@ -1426,7 +1426,7 @@ def _impl(ctx):
             ],
             tools = [
                 tool(
-                    path = "wrapped_clang",
+                    path = "wrapped_clang_pp",
                     execution_requirements = xcode_execution_requirements,
                 ),
             ],
@@ -1466,7 +1466,7 @@ def _impl(ctx):
             ],
             tools = [
                 tool(
-                    path = "wrapped_clang",
+                    path = "wrapped_clang_pp",
                     execution_requirements = xcode_execution_requirements,
                 ),
             ],
@@ -1503,7 +1503,7 @@ def _impl(ctx):
             ],
             tools = [
                 tool(
-                    path = "wrapped_clang",
+                    path = "wrapped_clang_pp",
                     execution_requirements = xcode_execution_requirements,
                 ),
             ],
@@ -1539,7 +1539,7 @@ def _impl(ctx):
             ],
             tools = [
                 tool(
-                    path = "wrapped_clang",
+                    path = "wrapped_clang_pp",
                     execution_requirements = xcode_execution_requirements,
                 ),
             ],
@@ -1609,7 +1609,7 @@ def _impl(ctx):
             ],
             tools = [
                 tool(
-                    path = "wrapped_clang",
+                    path = "wrapped_clang_pp",
                     execution_requirements = xcode_execution_requirements,
                 ),
             ],
@@ -1646,7 +1646,7 @@ def _impl(ctx):
             ],
             tools = [
                 tool(
-                    path = "wrapped_clang",
+                    path = "wrapped_clang_pp",
                     execution_requirements = xcode_execution_requirements,
                 ),
             ],
@@ -1719,7 +1719,7 @@ def _impl(ctx):
             ],
             tools = [
                 tool(
-                    path = "wrapped_clang",
+                    path = "wrapped_clang_pp",
                     execution_requirements = xcode_execution_requirements,
                 ),
             ],
@@ -3851,7 +3851,11 @@ def _impl(ctx):
                               ["objc-executable", "objc++-executable"],
                     flag_groups = [
                         flag_group(
-                            flags = ["-no-canonical-prefixes"],
+                            flags = [
+                                "-no-canonical-prefixes",
+                                "-target",
+                                "x86_64-apple-macosx",
+                            ],
                         ),
                     ],
                 ),
@@ -4555,7 +4559,11 @@ def _impl(ctx):
                         key = "APPLE_SDK_PLATFORM",
                         value = "%{apple_sdk_platform_value}",
                     ),
-                ],
+                    env_entry(
+                        key = "ZERO_AR_DATE",
+                        value = "1",
+                    ),
+                ] + [env_entry(key = key, value = value) for key, value in ctx.attr.extra_env.items()],
             ),
         ],
     )
@@ -4733,8 +4741,6 @@ def _impl(ctx):
             ),
         ],
     )
-
-    supports_dynamic_linker_feature = feature(name = "supports_dynamic_linker", enabled = True)
 
     objc_actions_feature = feature(
         name = "objc_actions",
@@ -5161,8 +5167,38 @@ def _impl(ctx):
                 ),
             ],
         )
-    elif (ctx.attr.cpu == "armeabi-v7a" or
-          ctx.attr.cpu == "darwin_x86_64"):
+    elif (ctx.attr.cpu == "darwin_x86_64"):
+        unfiltered_compile_flags_feature = feature(
+            name = "unfiltered_compile_flags",
+            flag_sets = [
+                flag_set(
+                    actions = [
+                        ACTION_NAMES.assemble,
+                        ACTION_NAMES.preprocess_assemble,
+                        ACTION_NAMES.c_compile,
+                        ACTION_NAMES.cpp_compile,
+                        ACTION_NAMES.cpp_header_parsing,
+                        ACTION_NAMES.cpp_module_compile,
+                        ACTION_NAMES.cpp_module_codegen,
+                        ACTION_NAMES.linkstamp_compile,
+                    ],
+                    flag_groups = [
+                        flag_group(
+                            flags = [
+                                "-no-canonical-prefixes",
+                                "-Wno-builtin-macro-redefined",
+                                "-D__DATE__=\"redacted\"",
+                                "-D__TIMESTAMP__=\"redacted\"",
+                                "-D__TIME__=\"redacted\"",
+                                "-target",
+                                "x86_64-apple-macosx",
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+    elif (ctx.attr.cpu == "armeabi-v7a"):
         unfiltered_compile_flags_feature = feature(
             name = "unfiltered_compile_flags",
             flag_sets = [
@@ -5198,20 +5234,35 @@ def _impl(ctx):
         name = "linker_param_file",
         flag_sets = [
             flag_set(
-                actions = all_link_actions,
-                flag_groups = [
-                    flag_group(
-                        flags = ["-Wl,@%{linker_param_file}"],
-                        expand_if_available = "linker_param_file",
-                    ),
+                actions = all_link_actions + [
+                    ACTION_NAMES.cpp_link_static_library,
+                    ACTION_NAMES.objc_archive,
+                    ACTION_NAMES.objc_fully_link,
+                    ACTION_NAMES.objc_executable,
+                    ACTION_NAMES.objcpp_executable,
                 ],
-            ),
-            flag_set(
-                actions = [ACTION_NAMES.cpp_link_static_library],
                 flag_groups = [
                     flag_group(
                         flags = ["@%{linker_param_file}"],
                         expand_if_available = "linker_param_file",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    relative_ast_path_feature = feature(
+        name = "relative_ast_path",
+        env_sets = [
+            env_set(
+                actions = all_link_actions + [
+                    ACTION_NAMES.objc_executable,
+                    ACTION_NAMES.objcpp_executable,
+                ],
+                env_entries = [
+                    env_entry(
+                        key = "RELATIVE_AST_PATH",
+                        value = "true",
                     ),
                 ],
             ),
@@ -5338,6 +5389,7 @@ def _impl(ctx):
 
     debug_prefix_map_pwd_is_dot_feature = feature(
         name = "debug_prefix_map_pwd_is_dot",
+        enabled = True,
         flag_sets = [
             flag_set(
                 actions = [
@@ -5353,6 +5405,29 @@ def _impl(ctx):
                     ACTION_NAMES.objcpp_compile,
                 ],
                 flag_groups = [flag_group(flags = ["DEBUG_PREFIX_MAP_PWD=."])],
+            ),
+        ],
+    )
+
+    remap_xcode_path_feature = feature(
+        name = "remap_xcode_path",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.assemble,
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_header_parsing,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.cpp_module_codegen,
+                    ACTION_NAMES.linkstamp_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [flag_group(flags = [
+                    "-fdebug-prefix-map=__BAZEL_XCODE_DEVELOPER_DIR__=DEVELOPER_DIR",
+                ])],
             ),
         ],
     )
@@ -5438,6 +5513,29 @@ def _impl(ctx):
                         flag_group(
                             flags = [
                                 "-D_FORTIFY_SOURCE=1",
+                            ],
+                        ),
+                    ],
+                    with_features = [with_feature_set(not_features = ["asan"])],
+                ),
+                flag_set(
+                    actions = [
+                        ACTION_NAMES.assemble,
+                        ACTION_NAMES.preprocess_assemble,
+                        ACTION_NAMES.linkstamp_compile,
+                        ACTION_NAMES.c_compile,
+                        ACTION_NAMES.cpp_compile,
+                        ACTION_NAMES.cpp_header_parsing,
+                        ACTION_NAMES.cpp_module_compile,
+                        ACTION_NAMES.cpp_module_codegen,
+                        ACTION_NAMES.lto_backend,
+                        ACTION_NAMES.clif_match,
+                        ACTION_NAMES.objc_compile,
+                        ACTION_NAMES.objcpp_compile,
+                    ],
+                    flag_groups = [
+                        flag_group(
+                            flags = [
                                 "-fstack-protector",
                                 "-fcolor-diagnostics",
                                 "-Wall",
@@ -5486,7 +5584,6 @@ def _impl(ctx):
                             flags = [
                                 "-g0",
                                 "-O2",
-                                "-D_FORTIFY_SOURCE=1",
                                 "-DNDEBUG",
                                 "-DNS_BLOCK_ASSERTIONS=1",
                             ],
@@ -5558,6 +5655,29 @@ def _impl(ctx):
                         flag_group(
                             flags = [
                                 "-D_FORTIFY_SOURCE=1",
+                            ],
+                        ),
+                    ],
+                    with_features = [with_feature_set(not_features = ["asan"])],
+                ),
+                flag_set(
+                    actions = [
+                        ACTION_NAMES.assemble,
+                        ACTION_NAMES.preprocess_assemble,
+                        ACTION_NAMES.linkstamp_compile,
+                        ACTION_NAMES.c_compile,
+                        ACTION_NAMES.cpp_compile,
+                        ACTION_NAMES.cpp_header_parsing,
+                        ACTION_NAMES.cpp_module_compile,
+                        ACTION_NAMES.cpp_module_codegen,
+                        ACTION_NAMES.lto_backend,
+                        ACTION_NAMES.clif_match,
+                        ACTION_NAMES.objc_compile,
+                        ACTION_NAMES.objcpp_compile,
+                    ],
+                    flag_groups = [
+                        flag_group(
+                            flags = [
                                 "-fstack-protector",
                                 "-fcolor-diagnostics",
                                 "-Wall",
@@ -5606,7 +5726,6 @@ def _impl(ctx):
                             flags = [
                                 "-g0",
                                 "-O2",
-                                "-D_FORTIFY_SOURCE=1",
                                 "-DNDEBUG",
                                 "-DNS_BLOCK_ASSERTIONS=1",
                             ],
@@ -5668,7 +5787,7 @@ def _impl(ctx):
                           ["objc-executable", "objc++-executable"],
                 flag_groups = [
                     flag_group(
-                        flags = ["-dead_strip", "-no_dead_strip_inits_and_terms"],
+                        flags = ["-dead_strip"],
                     ),
                 ],
             ),
@@ -5680,8 +5799,7 @@ def _impl(ctx):
         name = "oso_prefix_is_pwd",
         flag_sets = [
             flag_set(
-                actions = all_link_actions +
-                          ["objc-executable", "objc++-executable"],
+                actions = ["objc-executable", "objc++-executable"],
                 flag_groups = [flag_group(flags = ["OSO_PREFIX_MAP_PWD"])],
             ),
         ],
@@ -5968,7 +6086,7 @@ def _impl(ctx):
                                 "-Xlinker",
                                 "-bitcode_symbol_map",
                                 "-Xlinker",
-                                "BITCODE_TOUCH_SYMBOL_MAP=%{bitcode_symbol_map_path}",
+                                "%{bitcode_symbol_map_path}",
                             ],
                             expand_if_available = "bitcode_symbol_map_path",
                         ),
@@ -6023,6 +6141,162 @@ def _impl(ctx):
         ],
     )
 
+    set_install_name = feature(
+        name = "set_install_name",
+        enabled = ctx.fragments.cpp.do_not_use_macos_set_install_name,
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.cpp_link_dynamic_library,
+                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-Wl,-install_name,@rpath/%{runtime_solib_name}",
+                        ],
+                        expand_if_available = "runtime_solib_name",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+    asan_feature = feature(
+        name = "asan",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [
+                    flag_group(flags = ["-fsanitize=address"]),
+                ],
+                with_features = [
+                    with_feature_set(features = ["asan"]),
+                ],
+            ),
+            flag_set(
+                actions = [
+                    ACTION_NAMES.cpp_link_executable,
+                    ACTION_NAMES.cpp_link_dynamic_library,
+                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+                    ACTION_NAMES.objc_executable,
+                    ACTION_NAMES.objcpp_executable,
+                ],
+                flag_groups = [
+                    flag_group(flags = ["-fsanitize=address"]),
+                ],
+                with_features = [
+                    with_feature_set(features = ["asan"]),
+                ],
+            ),
+        ],
+    )
+
+    tsan_feature = feature(
+        name = "tsan",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [
+                    flag_group(flags = ["-fsanitize=thread"]),
+                ],
+                with_features = [
+                    with_feature_set(features = ["tsan"]),
+                ],
+            ),
+            flag_set(
+                actions = [
+                    ACTION_NAMES.cpp_link_executable,
+                    ACTION_NAMES.cpp_link_dynamic_library,
+                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+                    ACTION_NAMES.objc_executable,
+                    ACTION_NAMES.objcpp_executable,
+                ],
+                flag_groups = [
+                    flag_group(flags = ["-fsanitize=thread"]),
+                ],
+                with_features = [
+                    with_feature_set(features = ["tsan"]),
+                ],
+            ),
+        ],
+    )
+
+    ubsan_feature = feature(
+        name = "ubsan",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [
+                    flag_group(flags = ["-fsanitize=undefined"]),
+                ],
+                with_features = [
+                    with_feature_set(features = ["ubsan"]),
+                ],
+            ),
+            flag_set(
+                actions = [
+                    ACTION_NAMES.cpp_link_executable,
+                    ACTION_NAMES.cpp_link_dynamic_library,
+                    ACTION_NAMES.cpp_link_nodeps_dynamic_library,
+                    ACTION_NAMES.objc_executable,
+                    ACTION_NAMES.objcpp_executable,
+                ],
+                flag_groups = [
+                    flag_group(flags = ["-fsanitize=undefined"]),
+                ],
+                with_features = [
+                    with_feature_set(features = ["ubsan"]),
+                ],
+            ),
+        ],
+    )
+
+    default_sanitizer_flags_feature = feature(
+        name = "default_sanitizer_flags",
+        enabled = True,
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = [
+                            "-O1",
+                            "-gline-tables-only",
+                            "-fno-omit-frame-pointer",
+                            "-fno-sanitize-recover=all",
+                        ],
+                    ),
+                ],
+                with_features = [
+                    with_feature_set(features = ["asan"]),
+                    with_feature_set(features = ["tsan"]),
+                    with_feature_set(features = ["ubsan"]),
+                ],
+            ),
+        ],
+    )
+
     if (ctx.attr.cpu == "ios_arm64" or
         ctx.attr.cpu == "ios_arm64e" or
         ctx.attr.cpu == "ios_armv7" or
@@ -6046,6 +6320,7 @@ def _impl(ctx):
             only_doth_headers_in_module_maps_feature,
             default_compile_flags_feature,
             debug_prefix_map_pwd_is_dot_feature,
+            remap_xcode_path_feature,
             generate_dsym_file_feature,
             generate_linkmap_feature,
             oso_prefix_feature,
@@ -6090,6 +6365,7 @@ def _impl(ctx):
             objc_arc_feature,
             no_objc_arc_feature,
             apple_env_feature,
+            relative_ast_path_feature,
             user_link_flags_feature,
             default_link_flags_feature,
             version_min_feature,
@@ -6105,6 +6381,11 @@ def _impl(ctx):
             compiler_input_flags_feature,
             compiler_output_flags_feature,
             objcopy_embed_flags_feature,
+            set_install_name,
+            asan_feature,
+            tsan_feature,
+            ubsan_feature,
+            default_sanitizer_flags_feature,
         ]
     elif (ctx.attr.cpu == "darwin_x86_64" or
           ctx.attr.cpu == "darwin_arm64" or
@@ -6121,6 +6402,7 @@ def _impl(ctx):
             only_doth_headers_in_module_maps_feature,
             default_compile_flags_feature,
             debug_prefix_map_pwd_is_dot_feature,
+            remap_xcode_path_feature,
             generate_dsym_file_feature,
             generate_linkmap_feature,
             oso_prefix_feature,
@@ -6165,6 +6447,7 @@ def _impl(ctx):
             objc_arc_feature,
             no_objc_arc_feature,
             apple_env_feature,
+            relative_ast_path_feature,
             user_link_flags_feature,
             default_link_flags_feature,
             version_min_feature,
@@ -6179,9 +6462,13 @@ def _impl(ctx):
             linker_param_file_feature,
             compiler_input_flags_feature,
             compiler_output_flags_feature,
-            supports_dynamic_linker_feature,
             objcopy_embed_flags_feature,
             dynamic_linking_mode_feature,
+            set_install_name,
+            asan_feature,
+            tsan_feature,
+            ubsan_feature,
+            default_sanitizer_flags_feature,
         ]
     elif (ctx.attr.cpu == "armeabi-v7a"):
         features = [
@@ -6196,6 +6483,7 @@ def _impl(ctx):
             only_doth_headers_in_module_maps_feature,
             default_compile_flags_feature,
             debug_prefix_map_pwd_is_dot_feature,
+            remap_xcode_path_feature,
             generate_dsym_file_feature,
             generate_linkmap_feature,
             oso_prefix_feature,
@@ -6240,6 +6528,7 @@ def _impl(ctx):
             objc_arc_feature,
             no_objc_arc_feature,
             apple_env_feature,
+            relative_ast_path_feature,
             user_link_flags_feature,
             default_link_flags_feature,
             version_min_feature,
@@ -6256,6 +6545,11 @@ def _impl(ctx):
             compiler_output_flags_feature,
             supports_pic_feature,
             objcopy_embed_flags_feature,
+            set_install_name,
+            asan_feature,
+            tsan_feature,
+            ubsan_feature,
+            default_sanitizer_flags_feature,
         ]
     else:
         fail("Unreachable")
@@ -6350,6 +6644,7 @@ cc_toolchain_config = rule(
         "compiler": attr.string(),
         "cxx_builtin_include_directories": attr.string_list(),
         "tool_paths_overrides": attr.string_dict(),
+        "extra_env": attr.string_dict(),
         "_xcode_config": attr.label(default = configuration_field(
             fragment = "apple",
             name = "xcode_config_label",
@@ -6357,4 +6652,5 @@ cc_toolchain_config = rule(
     },
     provides = [CcToolchainConfigInfo],
     executable = True,
+    fragments = ["cpp"],
 )

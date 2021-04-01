@@ -1,9 +1,12 @@
 ---
 layout: documentation
 title: Installing Bazel using Bazelisk
+category: getting-started
 ---
 
 # Installing Bazel using Bazelisk
+
+This page describes how to install Bazel using Bazelisk.
 
 [Bazelisk](https://github.com/bazelbuild/bazelisk) is a launcher for Bazel which
 automatically downloads and installs an appropriate version of Bazel. Use

@@ -25,6 +25,7 @@ import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictEx
 import com.google.devtools.build.lib.analysis.Allowlist;
 import com.google.devtools.build.lib.analysis.AnalysisUtils;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.DeniedImplicitOutputMarkerProvider;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.MakeVariableSupplier.MapBackedMakeVariableSupplier;
@@ -120,7 +121,6 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
       boolean linkStatic,
       boolean addDynamicRuntimeInputArtifactsToRunfiles)
       throws RuleErrorException, InterruptedException {
-    CcCommon.checkRuleLoadedThroughMacro(ruleContext);
     semantics.validateDeps(ruleContext);
     if (ruleContext.hasErrors()) {
       addEmptyRequiredProviders(targetBuilder);
@@ -258,7 +258,8 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
               ruleContext,
               ccToolchain,
               ruleContext.getConfiguration(),
-              LinkTargetType.NODEPS_DYNAMIC_LIBRARY));
+              LinkTargetType.NODEPS_DYNAMIC_LIBRARY,
+              CppHelper.getDLLHashSuffix(ruleContext, featureConfiguration)));
       if (CppHelper.useInterfaceSharedLibraries(
           cppConfiguration, ccToolchain, featureConfiguration)) {
         dynamicLibraries.add(
@@ -287,7 +288,8 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
               ruleContext,
               ccToolchain,
               ruleContext.getConfiguration(),
-              LinkTargetType.NODEPS_DYNAMIC_LIBRARY));
+              LinkTargetType.NODEPS_DYNAMIC_LIBRARY,
+              CppHelper.getDLLHashSuffix(ruleContext, featureConfiguration)));
       if (CppHelper.useInterfaceSharedLibraries(
           cppConfiguration, ccToolchain, featureConfiguration)) {
         dynamicLibraries.add(
@@ -388,7 +390,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
         linkingHelper.buildCcLinkingContextFromLibrariesToLink(
             neverLink ? ImmutableList.of() : libraryToLinks,
             compilationInfo.getCcCompilationContext());
-    CcNativeLibraryProvider ccNativeLibraryProvider =
+    CcNativeLibraryInfo ccNativeLibraryInfo =
         CppHelper.collectNativeCcLibraries(ruleContext.getPrerequisites("deps"), libraryToLinks);
 
     /*
@@ -435,7 +437,8 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
         common.getInstrumentedFilesProvider(
             instrumentedObjectFiles,
             /* withBaselineCoverage= */ true,
-            /* virtualToOriginalHeaders= */ NestedSetBuilder.create(Order.STABLE_ORDER));
+            /* virtualToOriginalHeaders= */ NestedSetBuilder.create(Order.STABLE_ORDER),
+            /* additionalMetadata= */ null);
     CppHelper.maybeAddStaticLinkMarkerProvider(targetBuilder, ruleContext);
 
     Runfiles.Builder builder = new Runfiles.Builder(ruleContext.getWorkspaceName());
@@ -476,7 +479,6 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
     CcStarlarkApiProvider.maybeAdd(ruleContext, targetBuilder);
     targetBuilder
         .setFilesToBuild(filesToBuild)
-        .addProvider(ccNativeLibraryProvider)
         .addNativeDeclaredProvider(
             CcInfo.builder()
                 .setCcCompilationContext(compilationInfo.getCcCompilationContext())
@@ -484,6 +486,7 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
                 .setCcDebugInfoContext(
                     CppHelper.mergeCcDebugInfoContexts(
                         compilationInfo.getCcCompilationOutputs(), ccInfosFromDeps))
+                .setCcNativeLibraryInfo(ccNativeLibraryInfo)
                 .build())
         .addOutputGroups(
             CcCommon.mergeOutputGroups(ImmutableList.of(currentOutputGroups, outputGroups.build())))
@@ -497,7 +500,12 @@ public abstract class CcLibrary implements RuleConfiguredTargetFactory {
       RuleConfiguredTargetBuilder targetBuilder, RuleContext ruleContext) {
     if (ruleContext.getRule().getImplicitOutputsFunction() != ImplicitOutputsFunction.NONE
         && !Allowlist.isAvailable(ruleContext, IMPLICIT_OUTPUTS_ALLOWLIST)) {
-      targetBuilder.addNativeDeclaredProvider(new DeniedImplicitOutputMarkerProvider());
+      targetBuilder.addNativeDeclaredProvider(
+          new DeniedImplicitOutputMarkerProvider(
+              String.format(
+                  "Using implicit outputs from cc_library (%s) is forbidden. Use the rule"
+                      + " cc_implicit_output as an alternative.",
+                  ruleContext.getLabel())));
     }
   }
 

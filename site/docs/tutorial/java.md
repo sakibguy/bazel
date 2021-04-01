@@ -1,11 +1,12 @@
 ---
 layout: documentation
 title: Build Tutorial - Java
+category: getting-started
 ---
 
-# Introduction to Bazel: Building a Java Project
+# Bazel Tutorial: Build a Java Project
 
-In this tutorial, you'll learn the basics of building Java applications with
+This tutorial covers the basics of building Java applications with
 Bazel. You will set up your workspace and build a simple Java project that
 illustrates key Bazel concepts, such as targets and `BUILD` files.
 
@@ -13,7 +14,7 @@ Estimated completion time: 30 minutes.
 
 ## What you'll learn
 
-In this tutorial you'll learn how to:
+In this tutorial you learn how to:
 
 *  Build a target
 *  Visualize the project's dependencies
@@ -21,13 +22,6 @@ In this tutorial you'll learn how to:
 *  Control target visibility across packages
 *  Reference targets through labels
 *  Deploy a target
-
-## Contents
-{:.no_toc}
-
-* ToC
-{:toc}
-
 
 ## Before you begin
 
@@ -38,7 +32,7 @@ you don't have it installed already.
 
 ### Install the JDK
 
-1.  Install Java 8 JDK.
+1.  Install Java JDK (preferred version is 11, however versions between 8 and 15 are supported).
 
 2.  Set the JAVA\_HOME environment variable to point to the JDK.
     *   On Linux/macOS:
@@ -134,15 +128,15 @@ instead of listing them one by one.)
 
 ### Build the project
 
-Let's build your sample project. Change into the `java-tutorial` directory
-and run the following command:
+To build your sample project, navigate to the `java-tutorial` directory
+and run:
 
 ```
 bazel build //:ProjectRunner
 ```
-Notice the target label - the `//` part is the location of our `BUILD` file
-relative to the root of the workspace (in this case, the root itself), and
-`ProjectRunner` is what we named that target in the `BUILD` file. (You will
+In the target label, the `//` part is the location of the `BUILD` file
+relative to the root of the workspace (in this case, the root itself),
+and `ProjectRunner` is the target name in the `BUILD` file. (You will
 learn about target labels in more detail at the end of this tutorial.)
 
 Bazel produces output similar to the following:
@@ -171,8 +165,9 @@ Bazel requires build dependencies to be explicitly declared in BUILD files.
 Bazel uses those statements to create the project's dependency graph, which
 enables accurate incremental builds.
 
-Let's visualize our sample project's dependencies. First, generate a text
-representation of the dependency graph (run the command at the workspace root):
+To visualize the sample project's dependencies, you can generate a text
+representation of the dependency graph by running this command at the
+workspace root:
 
 ```
 bazel query  --notool_deps --noimplicit_deps "deps(//:ProjectRunner)" --output graph
@@ -190,8 +185,8 @@ no additional dependencies:
 
 ![Dependency graph of the target 'ProjectRunner'](/assets/tutorial_java_01.svg)
 
-Now that you have set up your workspace, built your project, and examined its
-dependencies, let's add some complexity.
+After you set up your workspace, build your project, and examine its
+dependencies, then you can add some complexity.
 
 ## Refine your Bazel build
 
@@ -202,7 +197,7 @@ building multiple parts of a project at once.
 
 ### Specify multiple build targets
 
-Let's split our sample project build into two targets. Replace the contents of
+You can split the sample project build into two targets. Replace the contents of
 the `java-tutorial/BUILD` file with the following:
 
 ```python
@@ -223,7 +218,7 @@ With this configuration, Bazel first builds the `greeter` library, then the
 `ProjectRunner` binary. The `deps` attribute in `java_binary` tells Bazel that
 the `greeter` library is required to build the `ProjectRunner` binary.
 
-Let's build this new version of our project. Run the following command:
+To build this new version of the project, run the following command:
 
 ```
 bazel build //:ProjectRunner
@@ -283,8 +278,8 @@ Take a look at the dependency graph:
 
 ![Dependency graph of the target 'runner'](/assets/tutorial_java_03.svg)
 
-However, for the build to succeed, you must explicitly give the `runner` target in
-`//src/main/java/com/example/cmdline/BUILD` visibility to targets in
+However, for the build to succeed, you must explicitly give the `runner` target
+in `//src/main/java/com/example/cmdline/BUILD` visibility to targets in
 `//BUILD` using the `visibility` attribute. This is because by default targets
 are only visible to other targets in the same `BUILD` file. (Bazel uses target
 visibility to prevent issues such as libraries containing implementation details
@@ -301,8 +296,8 @@ java_library(
 )
 ```
 
-Let's now build the new package. Run the following command at the root of the
-workspace:
+Now you can build the new package by running the following command at the root
+of the workspace:
 
 ```
 bazel build //src/main/java/com/example/cmdline:runner
@@ -405,6 +400,8 @@ your development environment since it contains the required runtime
 dependencies.
 
 ## Further reading
+
+For more details, see:
 
 *  [rules_jvm_external](https://github.com/bazelbuild/rules_jvm_external) for
    rules to manage transitive Maven dependencies.

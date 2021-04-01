@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.query2.common;
 import static java.util.concurrent.TimeUnit.MINUTES;
 
 import com.google.common.base.Preconditions;
+import com.google.common.base.Predicates;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
@@ -45,6 +46,7 @@ import com.google.devtools.build.lib.server.FailureDetails.Query.Code;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -250,10 +252,10 @@ public abstract class AbstractBlazeQueryEnvironment<T> extends AbstractQueryEnvi
       if (detailedExitCode != null) {
         throw new QueryException(expression, message, detailedExitCode.getFailureDetail());
       }
+      logger.atWarning().atMostEvery(1, MINUTES).log(
+          "Null detailed exit code for %s %s", message, expression);
       throw new QueryException(expression, message, Query.Code.BUILD_FILE_ERROR);
     }
-    logger.atWarning().atMostEvery(1, MINUTES).log(
-        "Null detailed exit code for %s %s", message, expression);
     eventHandler.handle(createErrorEvent(expression, message, detailedExitCode));
   }
 
@@ -275,6 +277,20 @@ public abstract class AbstractBlazeQueryEnvironment<T> extends AbstractQueryEnvi
       resultBuilder.put(label, target);
     }
     return resultBuilder.build();
+  }
+
+  protected void validateScopeOfTargets(Set<Target> targets) throws QueryException {
+    // Sets.filter would be more convenient here, but can't deal with exceptions.
+    if (labelFilter != Predicates.<Label>alwaysTrue()) {
+      // The labelFilter is always true for bazel query; it's only used for genquery rules.
+      Iterator<Target> targetIterator = targets.iterator();
+      while (targetIterator.hasNext()) {
+        Target target = targetIterator.next();
+        if (!validateScope(target.getLabel(), strictScope)) {
+          targetIterator.remove();
+        }
+      }
+    }
   }
 
   protected boolean validateScope(Label label, boolean strict) throws QueryException {

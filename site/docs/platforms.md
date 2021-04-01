@@ -5,7 +5,6 @@ title: Platforms
 
 # Platforms
 
-## Overview
 
 Bazel can build and test code on a variety of hardware, operating systems, and
 system configurations, using many different versions of build tools such as
@@ -113,3 +112,140 @@ command-line flags:
 
 *  `--host_platform` - defaults to `@bazel_tools//platforms:host_platform`
 *  `--platforms` - defaults to `@bazel_tools//platforms:target_platform`
+
+## Skipping incompatible targets
+
+When building for a specific target platform it is often desirable to skip
+targets that will never work on that platform. For example, your Windows device
+driver is likely going to generate lots of compiler errors when building on a
+Linux machine with `//...`. Use the
+[`target_compatible_with`](be/common-definitions.html#common.target_compatible_with)
+attribute to tell Bazel what target platform constraints your code has.
+
+The simplest use of this attribute restricts a target to a single platform.
+The target will not be built for any platform that doesn't satisfy all of the
+constraints. The following example restricts `win_driver_lib.cc` to 64-bit
+Windows.
+
+```python
+cc_library(
+    name = "win_driver_lib",
+    srcs = "win_driver_lib.cc",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+)
+```
+
+`:win_driver_lib` is *only* compatible for building with 64-bit Windows and
+incompatible with all else. Incompatibility is transitive. Any targets
+that transitively depend on an incompatible target are themselves considered
+incompatible.
+
+### When are targets skipped?
+
+Targets are skipped when they are considered incompatible and included in the
+build as part of a target pattern expansion. For example, the following two
+invocations skip any incompatible targets found in a target pattern expansion.
+
+```console
+$ bazel build --platforms=//:myplatform //...`
+```
+
+```console
+$ bazel build --platforms=//:myplatform //:all`
+```
+
+Incompatible tests in a [`test_suite`](be/general.html#test_suite) are
+similarly skipped if the `test_suite` is specified on the command line with
+[`--expand_test_suites`](command-line-reference.html#flag--expand_test_suites).
+In other words, `test_suite` targets on the command line behave like `:all` and
+`...`. Using `--noexpand_test_suites` prevents expansion and causes
+`test_suite` targets with incompatible tests to also be incompatible.
+
+Explicitly specifying an incompatible target on the command line results in an
+error message and a failed build.
+
+```console
+$ bazel build --platforms=//:myplatform //:target_incompatible_with_myplatform
+...
+ERROR: Target //:target_incompatible_with_myplatform is incompatible and cannot be built, but was explicitly requested.
+...
+FAILED: Build did NOT complete successfully
+```
+
+### More expressive constraints
+
+For more flexibility in expressing constraints, use the
+`@platforms//:incompatible`
+[`constraint_value`](be/platform.html#constraint_value) that no platform
+satisfies.
+
+Use [`select()`](functions.html#select) in combination with
+`@platforms//:incompatible` to express more complicated restrictions. For
+example, use it to implement basic OR logic. The following marks a library
+compatible with macOS and Linux, but no other platforms. Note that an empty
+constraints list is equivalent to "compatible with everything".
+
+```python
+cc_library(
+    name = "unixish_lib",
+    srcs = "unixish_lib.cc",
+    target_compatible_with = select({
+        "@platforms//os:osx": [],
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
+```
+
+The above can be interpreted as follows:
+
+1. When targeting macOS, the target has no constraints.
+2. When targeting Linux, the target has no constraints.
+3. Otherwise, the target has the `@platforms//:incompatible` constraint. Because
+   `@platforms//:incompatible` is not part of any platform, the target is
+   deemed incompatible.
+
+To make your constraints more readable, use
+[skylib](https://github.com/bazelbuild/bazel-skylib)'s
+[`selects.with_or()`](https://github.com/bazelbuild/bazel-skylib/blob/master/docs/selects_doc.md#selectswith_or).
+
+You can express inverse compatibility in a similar way. The following example
+describes a library that is compatible with everything _except_ for ARM.
+
+```python
+cc_library(
+    name = "non_arm_lib",
+    srcs = "non_arm_lib.cc",
+    target_compatible_with = select({
+        "@platforms//cpu:arm": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    ],
+)
+```
+
+### Detecting incompatible targets using `bazel cquery`
+
+You can use the
+[`IncompatiblePlatformProvider`](skylark/lib/IncompatiblePlatformProvider.html)
+in `bazel cquery`'s [Starlark output
+format](cquery.html#defining-the-output-format-using-starlark) to distinguish
+incompatible targets from compatible ones.
+
+This can be used to filter out incompatible targets. The example below will
+only print the labels for targets that are compatible. Incompatible targets are
+not printed.
+
+```console
+$ cat example.cquery
+
+def format(target):
+  if "IncompatiblePlatformProvider" not in providers(target):
+    return target.label
+  return ""
+
+
+$ bazel cquery //... --output=starlark --starlark:file=example.cquery
+```

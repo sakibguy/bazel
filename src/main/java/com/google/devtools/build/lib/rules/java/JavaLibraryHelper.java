@@ -28,7 +28,7 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.JavaClasspathMode;
-import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider.OutputJar;
+import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider.JavaOutput;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -54,6 +54,9 @@ public final class JavaLibraryHelper {
    * Contains all the dependencies; these are treated as both compile-time and runtime dependencies.
    */
   private final List<JavaCompilationArgsProvider> deps = new ArrayList<>();
+
+  /** Contains runtime dependencies. */
+  private final List<JavaCompilationArgsProvider> runtimeDeps = new ArrayList<>();
 
   private final List<JavaCompilationArgsProvider> exports = new ArrayList<>();
   private JavaPluginInfoProvider plugins = JavaPluginInfoProvider.empty();
@@ -108,6 +111,12 @@ public final class JavaLibraryHelper {
   public JavaLibraryHelper addDep(JavaCompilationArgsProvider provider) {
     checkNotNull(provider);
     this.deps.add(provider);
+    return this;
+  }
+
+  public JavaLibraryHelper addRuntimeDep(JavaCompilationArgsProvider provider) {
+    checkNotNull(provider);
+    this.runtimeDeps.add(provider);
     return this;
   }
 
@@ -174,15 +183,12 @@ public final class JavaLibraryHelper {
    *
    * @param semantics implementation specific java rules semantics
    * @param javaToolchainProvider used for retrieving misc java tools
-   * @param hostJavabase the target of the host javabase used to retrieve the java executable and
-   *     its necessary inputs
    * @param outputJarsBuilder populated with the outputs of the created actions
    * @param outputSourceJar if not-null, the output of an source jar action that will be created
    */
   public JavaCompilationArtifacts build(
       JavaSemantics semantics,
       JavaToolchainProvider javaToolchainProvider,
-      JavaRuntimeInfo hostJavabase,
       JavaRuleOutputJarsProvider.Builder outputJarsBuilder,
       boolean createOutputSourceJar,
       @Nullable Artifact outputSourceJar)
@@ -190,7 +196,6 @@ public final class JavaLibraryHelper {
     return build(
         semantics,
         javaToolchainProvider,
-        hostJavabase,
         outputJarsBuilder,
         createOutputSourceJar,
         outputSourceJar,
@@ -203,13 +208,12 @@ public final class JavaLibraryHelper {
   public JavaCompilationArtifacts build(
       JavaSemantics semantics,
       JavaToolchainProvider javaToolchainProvider,
-      JavaRuntimeInfo hostJavabase,
       JavaRuleOutputJarsProvider.Builder outputJarsBuilder,
       boolean createOutputSourceJar,
       @Nullable Artifact outputSourceJar,
       @Nullable JavaInfo.Builder javaInfoBuilder,
       List<JavaGenJarsProvider> transitiveJavaGenJars,
-      ImmutableList<Artifact> additionalJavaBaseInputs,
+      ImmutableList<Artifact> additionalInputForDatabinding,
       NestedSet<Artifact> localClassPathEntries)
       throws InterruptedException {
 
@@ -246,8 +250,7 @@ public final class JavaLibraryHelper {
             javacOpts,
             attributes,
             javaToolchainProvider,
-            hostJavabase,
-            additionalJavaBaseInputs);
+            additionalInputForDatabinding);
     helper.addLocalClassPathEntries(localClassPathEntries);
     JavaCompileOutputs<Artifact> outputs = helper.createOutputs(output);
     artifactsBuilder.setCompileTimeDependencies(outputs.depsProto());
@@ -260,17 +263,17 @@ public final class JavaLibraryHelper {
     }
 
     if (createOutputSourceJar) {
-      helper.createSourceJarAction(
-          outputSourceJar, outputs.genSource(), javaToolchainProvider, hostJavabase);
+      helper.createSourceJarAction(outputSourceJar, outputs.genSource(), javaToolchainProvider);
     }
-    ImmutableList<Artifact> outputSourceJars =
-        outputSourceJar == null ? ImmutableList.of() : ImmutableList.of(outputSourceJar);
-    outputJarsBuilder
-        .addOutputJar(new OutputJar(output, iJar, outputs.manifestProto(), outputSourceJars))
-        .setJdeps(outputs.depsProto())
-        .setNativeHeaders(outputs.nativeHeader());
-
     JavaCompilationArtifacts javaArtifacts = artifactsBuilder.build();
+    outputJarsBuilder.addJavaOutput(
+        JavaOutput.builder()
+            .fromJavaCompileOutputs(outputs)
+            .setCompileJar(iJar)
+            .setCompileJdeps(javaArtifacts.getCompileTimeDependencyArtifact())
+            .addSourceJar(outputSourceJar)
+            .build());
+
     if (javaInfoBuilder != null) {
       ClasspathConfiguredFragment classpathFragment =
           new ClasspathConfiguredFragment(
@@ -330,7 +333,7 @@ public final class JavaLibraryHelper {
             /* srcLessDepsExport= */ false,
             artifacts,
             deps,
-            /* runtimeDeps= */ ImmutableList.of(),
+            runtimeDeps,
             exports);
 
     if (!isReportedAsStrict) {
@@ -340,14 +343,16 @@ public final class JavaLibraryHelper {
   }
 
   private void addDepsToAttributes(JavaTargetAttributes.Builder attributes) {
-    JavaCompilationArgsProvider argsProvider = JavaCompilationArgsProvider.merge(deps);
+    JavaCompilationArgsProvider mergedDeps = JavaCompilationArgsProvider.merge(deps);
+    JavaCompilationArgsProvider mergedRuntimeDeps = JavaCompilationArgsProvider.merge(runtimeDeps);
 
     if (isStrict()) {
-      attributes.addDirectJars(argsProvider.getDirectCompileTimeJars());
+      attributes.addDirectJars(mergedDeps.getDirectCompileTimeJars());
     }
 
-    attributes.addCompileTimeClassPathEntries(argsProvider.getTransitiveCompileTimeJars());
-    attributes.addRuntimeClassPathEntries(argsProvider.getRuntimeJars());
+    attributes.addCompileTimeClassPathEntries(mergedDeps.getTransitiveCompileTimeJars());
+    attributes.addRuntimeClassPathEntries(mergedRuntimeDeps.getRuntimeJars());
+    attributes.addRuntimeClassPathEntries(mergedDeps.getRuntimeJars());
   }
 
   private boolean isStrict() {

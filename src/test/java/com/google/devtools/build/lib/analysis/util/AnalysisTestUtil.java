@@ -32,9 +32,12 @@ import com.google.devtools.build.lib.actions.ArtifactRoot;
 import com.google.devtools.build.lib.actions.MiddlemanFactory;
 import com.google.devtools.build.lib.actions.MutableActionGraph;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
+import com.google.devtools.build.lib.actions.RunfilesSupplier;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.OutputGroupInfo;
+import com.google.devtools.build.lib.analysis.Runfiles;
+import com.google.devtools.build.lib.analysis.SingleRunfilesSupplier;
 import com.google.devtools.build.lib.analysis.TopLevelArtifactContext;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction;
 import com.google.devtools.build.lib.analysis.WorkspaceStatusAction.Key;
@@ -104,7 +107,7 @@ public final class AnalysisTestUtil {
     }
 
     /** Calls {@link MutableActionGraph#registerAction} for all collected actions. */
-    public void registerWith(MutableActionGraph actionGraph) {
+    public void registerWith(MutableActionGraph actionGraph) throws InterruptedException {
       for (ActionAnalysisMetadata action : actions) {
         try {
           actionGraph.registerAction(action);
@@ -184,6 +187,11 @@ public final class AnalysisTestUtil {
     @Override
     public StarlarkSemantics getStarlarkSemantics() throws InterruptedException {
       return original.getStarlarkSemantics();
+    }
+
+    @Override
+    public ImmutableMap<String, Object> getStarlarkDefinedBuiltins() throws InterruptedException {
+      return original.getStarlarkDefinedBuiltins();
     }
 
     @Override
@@ -401,6 +409,11 @@ public final class AnalysisTestUtil {
     }
 
     @Override
+    public ImmutableMap<String, Object> getStarlarkDefinedBuiltins() throws InterruptedException {
+      return null;
+    }
+
+    @Override
     public Artifact getFilesetArtifact(PathFragment rootRelativePath, ArtifactRoot root) {
       return null;
     }
@@ -507,11 +520,7 @@ public final class AnalysisTestUtil {
     for (Artifact artifact : artifacts) {
       ArtifactRoot root = artifact.getRoot();
       if (root.isSourceRoot()) {
-        if (root.isExternalSourceRoot()) {
-          files.add("src(external) " + artifact.getRootRelativePath());
-        } else {
-          files.add("src " + artifact.getRootRelativePath());
-        }
+        files.add("src " + artifact.getExecPath());
       } else {
         String name = rootMap.getOrDefault(root.getRoot().toString(), "/");
         files.add(name + " " + artifact.getRootRelativePath());
@@ -520,4 +529,14 @@ public final class AnalysisTestUtil {
     return files;
   }
 
+  /** Creates a {@link RunfilesSupplier} for use in tests. */
+  public static RunfilesSupplier createRunfilesSupplier(
+      PathFragment runfilesDir, Runfiles runfiles) {
+    return new SingleRunfilesSupplier(
+        runfilesDir,
+        runfiles,
+        /*manifest=*/ null,
+        /*buildRunfileLinks=*/ false,
+        /*runfileLinksEnabled=*/ false);
+  }
 }

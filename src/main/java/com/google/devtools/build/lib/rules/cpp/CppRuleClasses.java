@@ -245,6 +245,9 @@ public class CppRuleClasses {
   /** A string constant for the include_paths feature. */
   public static final String INCLUDE_PATHS = "include_paths";
 
+  /** A string constant for the external_include_paths feature. */
+  public static final String EXTERNAL_INCLUDE_PATHS = "external_include_paths";
+
   /** A string constant for the feature signalling static linking mode. */
   public static final String STATIC_LINKING_MODE = "static_linking_mode";
 
@@ -277,6 +280,12 @@ public class CppRuleClasses {
    */
   public static final String ENABLE_XFDO_THINLTO = "enable_xbinaryfdo_thinlto";
 
+  /** A string constant for the split functions feature. */
+  public static final String SPLIT_FUNCTIONS = "split_functions";
+
+  /** A string constant for enabling split functions for FDO implicitly. */
+  public static final String ENABLE_FDO_SPLIT_FUNCTIONS = "enable_fdo_split_functions";
+
   /**
    * A string constant for allowing use of shared LTO backend actions for linkstatic tests building
    * with ThinLTO.
@@ -290,6 +299,15 @@ public class CppRuleClasses {
    */
   public static final String THIN_LTO_ALL_LINKSTATIC_USE_SHARED_NONLTO_BACKENDS =
       "thin_lto_all_linkstatic_use_shared_nonlto_backends";
+
+  /** A string constant for native deps links. */
+  public static final String NATIVE_DEPS_LINK = "native_deps_link";
+
+  /** A string constant for java launcher links. */
+  public static final String JAVA_LAUNCHER_LINK = "java_launcher_link";
+
+  /** A string constant for python launcher links. */
+  public static final String PY_LAUNCHER_LINK = "py_launcher_link";
 
   /**
    * A string constant for the PDB file generation feature, should only be used for toolchains
@@ -410,15 +428,7 @@ public class CppRuleClasses {
   public static final String DISABLE_WHOLE_ARCHIVE_FOR_STATIC_LIB =
       "disable_whole_archive_for_static_lib";
 
-  /**
-   * TODO(b/113358321): This feature should be enabled for CROSSTOOLs that work without linking
-   * command line splitting. Eventually when every CROSSTOOL works without linking command line
-   * splitting, this feature can be deleted. The flag --incompatible_do_not_split_linking_cmdline
-   * will activate the same code path even if this feature is not present. See GitHub issue #7670.
-   */
-  public static final String DO_NOT_SPLIT_LINKING_CMDLINE = "do_not_split_linking_cmdline";
-
-  public static final String COMPIILER_PARAM_FILE = "compiler_param_file";
+  public static final String COMPILER_PARAM_FILE = "compiler_param_file";
 
   /**
    * A feature to indicate that this target generates debug symbols for a dSYM file. For Apple

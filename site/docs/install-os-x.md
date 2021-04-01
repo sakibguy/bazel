@@ -1,11 +1,14 @@
 ---
 layout: documentation
 title: Installing Bazel on macOS
+category: getting-started
 ---
 
 <h1 id="mac-os-x">Installing Bazel on macOS</h1>
 
-Install Bazel on macOS using one of the following methods:
+This page describes how to install Bazel on macOS and set up your environment.
+
+You can install Bazel on macOS using one of the following methods:
 
 *   [Use the binary installer (recommended)](#install-with-installer-mac-os-x)
 *   [Use Homebrew](#install-on-mac-os-x-homebrew)
@@ -63,8 +66,8 @@ export BAZEL_VERSION=3.2.0
 curl -fLO "https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/bazel-${BAZEL_VERSION}-installer-darwin-x86_64.sh"
 ```
 
-This is a temporary workaround until we fix notarization in our macOS release
-workflow ([#9304](https://github.com/bazelbuild/bazel/issues/9304)).
+This is a temporary workaround until the macOS release flow supports
+notarization ([#9304](https://github.com/bazelbuild/bazel/issues/9304)).
 
 ### Step 3: Run the installer
 

@@ -32,9 +32,9 @@ import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.BuiltinProvider;
 import com.google.devtools.build.lib.packages.Info;
-import com.google.devtools.build.lib.packages.NativeProvider;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.TriState;
+import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -57,11 +57,18 @@ public final class AnalysisUtils {
    * -1.
    */
   public static boolean isStampingEnabled(RuleContext ruleContext, BuildConfiguration config) {
-    if (config.isToolConfiguration()
-        || !ruleContext.attributes().has("stamp", BuildType.TRISTATE)) {
+    if (config.isToolConfiguration()) {
       return false;
     }
-    TriState stamp = ruleContext.attributes().get("stamp", BuildType.TRISTATE);
+    TriState stamp;
+    if (ruleContext.attributes().has("stamp", BuildType.TRISTATE)) {
+      stamp = ruleContext.attributes().get("stamp", BuildType.TRISTATE);
+    } else if (ruleContext.attributes().has("stamp", Type.INTEGER)) {
+      int value = ruleContext.attributes().get("stamp", Type.INTEGER).toIntUnchecked();
+      stamp = TriState.fromInt(value);
+    } else {
+      return false;
+    }
     return stamp == TriState.YES || (stamp == TriState.AUTO && config.stampBinaries());
   }
 
@@ -80,23 +87,6 @@ public final class AnalysisUtils {
     ImmutableList.Builder<C> result = ImmutableList.builder();
     for (TransitiveInfoCollection prerequisite : prerequisites) {
       C prerequisiteProvider =  prerequisite.getProvider(provider);
-      if (prerequisiteProvider != null) {
-        result.add(prerequisiteProvider);
-      }
-    }
-    return result.build();
-  }
-
-  /**
-   * Returns the list of declared providers (native and Starlark) of the specified Starlark key from
-   * a set of transitive info collections.
-   */
-  public static <T extends Info> List<T> getProviders(
-      Iterable<? extends TransitiveInfoCollection> prerequisites,
-      final NativeProvider<T> starlarkKey) {
-    ImmutableList.Builder<T> result = ImmutableList.builder();
-    for (TransitiveInfoCollection prerequisite : prerequisites) {
-      T prerequisiteProvider = prerequisite.get(starlarkKey);
       if (prerequisiteProvider != null) {
         result.add(prerequisiteProvider);
       }
@@ -131,12 +121,6 @@ public final class AnalysisUtils {
 
   /** Returns the iterable of collections that have the specified provider. */
   public static <S extends TransitiveInfoCollection, C extends Info> Iterable<S> filterByProvider(
-      Iterable<S> prerequisites, final NativeProvider<C> provider) {
-    return Iterables.filter(prerequisites, target -> target.get(provider) != null);
-  }
-
-  /** Returns the iterable of collections that have the specified provider. */
-  public static <S extends TransitiveInfoCollection, C extends Info> Iterable<S> filterByProvider(
       Iterable<S> prerequisites, final BuiltinProvider<C> provider) {
     return Iterables.filter(prerequisites, target -> target.get(provider) != null);
   }
@@ -152,16 +136,16 @@ public final class AnalysisUtils {
   }
 
   /**
-   * Returns a path fragment qualified by the rule name and unique fragment to
-   * disambiguate artifacts produced from the source file appearing in
-   * multiple rules.
+   * Returns a path fragment qualified by the rule name and unique fragment to disambiguate
+   * artifacts produced from the source file appearing in multiple rules.
    *
    * <p>For example "//pkg:target" -> "pkg/&lt;fragment&gt;/target.
    */
-  public static PathFragment getUniqueDirectory(Label label, PathFragment fragment) {
+  public static PathFragment getUniqueDirectory(
+      Label label, PathFragment fragment, boolean siblingRepositoryLayout) {
     return label
         .getPackageIdentifier()
-        .getPackagePath()
+        .getPackagePath(siblingRepositoryLayout)
         .getRelative(fragment)
         .getRelative(label.getName());
   }

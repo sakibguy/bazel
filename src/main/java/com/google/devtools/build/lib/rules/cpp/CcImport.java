@@ -49,7 +49,7 @@ public abstract class CcImport implements RuleConfiguredTargetFactory {
       Artifact noPicStaticLibrary = null;
       Artifact picStaticLibrary = null;
       if (staticLibrary != null) {
-        if (staticLibrary.getExtension().equals(".pic.a")) {
+        if (staticLibrary.getFilename().endsWith(".pic.a")) {
           picStaticLibrary = staticLibrary;
         } else {
           noPicStaticLibrary = staticLibrary;
@@ -69,8 +69,6 @@ public abstract class CcImport implements RuleConfiguredTargetFactory {
   @Override
   public ConfiguredTarget create(RuleContext ruleContext)
       throws InterruptedException, RuleErrorException, ActionConflictException {
-    CcCommon.checkRuleLoadedThroughMacro(ruleContext);
-
     boolean systemProvided = ruleContext.attributes().get("system_provided", Type.BOOLEAN);
     CcToolchainProvider ccToolchain =
         CppHelper.getToolchainUsingDefaultCcToolchainAttribute(ruleContext);

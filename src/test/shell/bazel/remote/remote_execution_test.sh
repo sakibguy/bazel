@@ -1011,8 +1011,8 @@ EOF
   [[ $(< ${localtxt}) == "remotelocal" ]] \
   || fail "Unexpected contents in " ${localtxt} ": " $(< ${localtxt})
 
-  (! [[ -f bazel-bin/a/remote.txt ]]) \
-  || fail "Expected bazel-bin/a/remote.txt to have been deleted again"
+  [[ -f bazel-bin/a/remote.txt ]] \
+  || fail "Expected bazel-bin/a/remote.txt to be downloaded"
 }
 
 function test_download_outputs_invalidation() {
@@ -1105,8 +1105,8 @@ EOF
   [[ $(< ${outtxt}) == "Hello buchgr!" ]] \
   || fail "Unexpected contents in "${outtxt}":" $(< ${outtxt})
 
-  (! [[ -f bazel-bin/a/template.txt ]]) \
-  || fail "Expected bazel-bin/a/template.txt to have been deleted again"
+  [[ -f bazel-bin/a/template.txt ]] \
+  || fail "Expected bazel-bin/a/template.txt to be downloaded"
 }
 
 function test_downloads_toplevel() {
@@ -1440,6 +1440,41 @@ EOF
   expect_log "uri:.*bytestream://localhost"
 }
 
+function test_bytestream_uri_prefix() {
+  # Test that when --remote_bytestream_uri_prefix is set, bytestream://
+  # URIs do not contain the hostname that's part of --remote_executor.
+  # They should use a fixed value instead.
+  mkdir -p a
+  cat > a/success.sh <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+  chmod 755 a/success.sh
+  cat > a/BUILD <<'EOF'
+sh_test(
+  name = "success_test",
+  srcs = ["success.sh"],
+)
+
+genrule(
+  name = "foo",
+  srcs = [],
+  outs = ["foo.txt"],
+  cmd = "echo \"foo\" > \"$@\"",
+)
+EOF
+
+  bazel test \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --remote_download_minimal \
+    --remote_bytestream_uri_prefix=example.com/my-instance-name \
+    --build_event_text_file=$TEST_log \
+    //a:foo //a:success_test || fail "Failed to test //a:foo //a:success_test"
+
+  expect_not_log 'uri:.*file://'
+  expect_log "uri:.*bytestream://example.com/my-instance-name/blobs"
+}
+
 # This test is derivative of test_bep_output_groups in
 # build_event_stream_test.sh, which verifies that successful output groups'
 # artifacts appear in BEP when a top-level target fails to build.
@@ -1665,6 +1700,24 @@ EOF
 function test_download_toplevel_no_remote_execution() {
   bazel build --remote_download_toplevel \
       || fail "Failed to run bazel build --remote_download_toplevel"
+}
+
+function test_download_toplevel_can_delete_directory_outputs() {
+  cat > BUILD <<'EOF'
+genrule(
+    name = 'g',
+    outs = ['out'],
+    cmd = "touch $@",
+)
+EOF
+  bazel build
+  mkdir $(bazel info bazel-genfiles)/out
+  touch $(bazel info bazel-genfiles)/out/f
+  bazel build \
+        --remote_download_toplevel \
+        --remote_executor=grpc://localhost:${worker_port} \
+        //:g \
+        || fail "should have worked"
 }
 
 function test_tag_no_remote_cache() {
@@ -2141,6 +2194,28 @@ EOF
     @local_foo//:all
 }
 
+function test_remote_input_files_executable_bit() {
+  # Test that input files uploaded to remote executor have the same executable bit with local files. #12818
+  touch WORKSPACE
+  cat > BUILD <<'EOF'
+genrule(
+  name = "test",
+  srcs = ["foo.txt", "bar.sh"],
+  outs = ["out.txt"],
+  cmd = "ls -l $(SRCS); touch $@",
+)
+EOF
+  touch foo.txt bar.sh
+  chmod a+x bar.sh
+
+  bazel build \
+    --remote_executor=grpc://localhost:${worker_port} \
+    //:test >& $TEST_log || fail "Failed to build //:test"
+
+  expect_log "-rwxr--r-- .* bar.sh"
+  expect_log "-rw-r--r-- .* foo.txt"
+}
+
 function test_exclusive_tag() {
   # Test that the exclusive tag works with the remote cache.
   mkdir -p a
@@ -2257,6 +2332,98 @@ EOF
   bazel build --disk_cache="$CACHEDIR" --remote_download_toplevel :test >& $TEST_log
 
   expect_log "INFO: Build completed successfully"
+}
+
+# This test uses the flag experimental_split_coverage_postprocessing. Without
+# the flag coverage won't work remotely. Without the flag, tests and coverage
+# post-processing happen in the same spawn, but only the runfiles tree of the
+# tests is made available to the spawn. The solution was not to merge the
+# runfiles tree which could cause its own problems but to split both into
+# different spawns. The reason why this only failed remotely and not locally was
+# because the coverage post-processing tool escaped the sandbox to find its own
+# runfiles. The error we would see here without the flag would be "Cannot find
+# runfiles". See #4685.
+function test_rbe_coverage_produces_report() {
+  mkdir -p java/factorial
+
+  JAVA_TOOLS_ZIP="released"
+  COVERAGE_GENERATOR_DIR="released"
+
+  cd java/factorial
+
+  cat > BUILD <<'EOF'
+java_library(
+    name = "fact",
+    srcs = ["Factorial.java"],
+)
+
+java_test(
+    name = "fact-test",
+    size = "small",
+    srcs = ["FactorialTest.java"],
+    test_class = "factorial.FactorialTest",
+    deps = [
+        ":fact",
+    ],
+)
+
+EOF
+
+  cat > Factorial.java <<'EOF'
+package factorial;
+
+public class Factorial {
+  public static int factorial(int x) {
+    return x <= 0 ? 1 : x * factorial(x-1);
+  }
+}
+EOF
+
+  cat > FactorialTest.java <<'EOF'
+package factorial;
+
+import static org.junit.Assert.*;
+
+import org.junit.Test;
+
+public class FactorialTest {
+  @Test
+  public void testFactorialOfZeroIsOne() throws Exception {
+    assertEquals(Factorial.factorial(3),6);
+  }
+}
+EOF
+  cd ../..
+
+  cat $(rlocation io_bazel/src/test/shell/bazel/testdata/jdk_http_archives) >> WORKSPACE
+
+  bazel coverage \
+    --test_output=all \
+    --experimental_fetch_all_coverage_outputs \
+    --experimental_split_coverage_postprocessing \
+    --spawn_strategy=remote \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --instrumentation_filter=//java/factorial \
+    //java/factorial:fact-test >& $TEST_log || fail "Shouldn't fail"
+
+  local expected_result="SF:java/factorial/Factorial.java
+FN:3,factorial/Factorial::<init> ()V
+FN:5,factorial/Factorial::factorial (I)I
+FNDA:0,factorial/Factorial::<init> ()V
+FNDA:1,factorial/Factorial::factorial (I)I
+FNF:2
+FNH:1
+BRDA:5,0,0,1
+BRDA:5,0,1,1
+BRF:2
+BRH:2
+DA:3,0
+DA:5,1
+LH:1
+LF:2
+end_of_record"
+
+  assert_equals "$expected_result" "$(cat bazel-testlogs/java/factorial/fact-test/coverage.dat)"
 }
 
 run_suite "Remote execution and remote cache tests"

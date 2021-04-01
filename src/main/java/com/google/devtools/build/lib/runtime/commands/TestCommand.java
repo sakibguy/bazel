@@ -124,16 +124,23 @@ public class TestCommand implements BlazeCommand {
       env.getReporter().handle(Event.error(e.getMessage()));
       return BlazeCommandResult.failureDetail(e.getFailureDetail());
     }
-    BuildRequest request = BuildRequest.create(
-        getClass().getAnnotation(Command.class).name(), options,
-        runtime.getStartupOptionsProvider(), targets,
-        env.getReporter().getOutErr(), env.getCommandId(), env.getCommandStartTime());
-    request.setRunTests();
+
+    BuildRequest.Builder builder =
+        BuildRequest.builder()
+            .setCommandName(getClass().getAnnotation(Command.class).name())
+            .setId(env.getCommandId())
+            .setOptions(options)
+            .setStartupOptions(runtime.getStartupOptionsProvider())
+            .setOutErr(env.getReporter().getOutErr())
+            .setTargets(targets)
+            .setStartTimeMillis(env.getCommandStartTime())
+            .setRunTests(true);
     if (options.getOptions(CoreOptions.class).collectCodeCoverage
         && !options.containsExplicitOption(
             InstrumentationFilterSupport.INSTRUMENTATION_FILTER_FLAG)) {
-      request.setNeedsInstrumentationFilter(true);
+      builder.setNeedsInstrumentationFilter(true);
     }
+    BuildRequest request = builder.build();
 
     BuildResult buildResult = new BuildTool(env).processRequest(request, null);
 
@@ -186,12 +193,11 @@ public class TestCommand implements BlazeCommand {
       return BlazeCommandResult.detailedExitCode(detailedExitCode);
     }
 
-    boolean buildSuccess = buildResult.getSuccess();
-    boolean testSuccess =
+    DetailedExitCode testResults =
         analyzeTestResults(
             testTargets, buildResult.getSkippedTargets(), testListener, options, env, printer);
 
-    if (testSuccess && !buildSuccess) {
+    if (testResults.isSuccess() && !buildResult.getSuccess()) {
       // If all tests run successfully, test summary should include warning if
       // there were build errors not associated with the test targets.
       printer.printLn(AnsiTerminalPrinter.Mode.ERROR
@@ -200,16 +206,8 @@ public class TestCommand implements BlazeCommand {
     }
 
     DetailedExitCode detailedExitCode =
-        buildSuccess
-            ? (testSuccess
-                ? DetailedExitCode.success()
-                : DetailedExitCode.of(
-                    FailureDetail.newBuilder()
-                        .setMessage("tests failed")
-                        .setTestCommand(
-                            FailureDetails.TestCommand.newBuilder().setCode(Code.TESTS_FAILED))
-                        .build()))
-            : buildResult.getDetailedExitCode();
+        DetailedExitCode.DetailedExitCodeComparator.chooseMoreImportantWithFirstIfTie(
+            buildResult.getDetailedExitCode(), testResults);
     env.getEventBus()
         .post(
             new TestingCompleteEvent(
@@ -220,10 +218,10 @@ public class TestCommand implements BlazeCommand {
   }
 
   /**
-   * Analyzes test results and prints summary information. Returns true if and only if all tests
-   * were successful.
+   * Analyzes test results and prints summary information. Returns a {@link DetailedExitCode}
+   * summarizing those test results.
    */
-  private boolean analyzeTestResults(
+  private static DetailedExitCode analyzeTestResults(
       Collection<ConfiguredTarget> testTargets,
       Collection<ConfiguredTarget> skippedTargets,
       AggregatingTestListener listener,

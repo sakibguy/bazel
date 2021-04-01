@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.rules.java.proto;
 
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.BuildType.LABEL;
-import static com.google.devtools.build.lib.rules.java.JavaRuleClasses.HOST_JAVA_RUNTIME_ATTRIBUTE_NAME;
 import static com.google.devtools.build.lib.rules.java.proto.JplCcLinkParams.createCcLinkingInfo;
 import static com.google.devtools.build.lib.rules.java.proto.StrictDepsUtils.createNonStrictCompilationArgsProvider;
 
@@ -29,7 +28,6 @@ import com.google.devtools.build.lib.analysis.ConfiguredAspectFactory;
 import com.google.devtools.build.lib.analysis.PlatformConfiguration;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.RuleDefinitionEnvironment;
-import com.google.devtools.build.lib.analysis.config.HostTransition;
 import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
@@ -44,9 +42,9 @@ import com.google.devtools.build.lib.rules.java.JavaConfiguration;
 import com.google.devtools.build.lib.rules.java.JavaInfo;
 import com.google.devtools.build.lib.rules.java.JavaRuleClasses;
 import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider;
+import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider.JavaOutput;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.rules.java.JavaSourceJarsProvider;
-import com.google.devtools.build.lib.rules.java.JavaStarlarkApiProvider;
 import com.google.devtools.build.lib.rules.proto.ProtoCompileActionBuilder;
 import com.google.devtools.build.lib.rules.proto.ProtoCompileActionBuilder.Exports;
 import com.google.devtools.build.lib.rules.proto.ProtoCompileActionBuilder.Services;
@@ -59,7 +57,6 @@ import com.google.devtools.build.lib.skyframe.ConfiguredTargetAndData;
 /** An Aspect which JavaProtoLibrary injects to build Java SPEED protos. */
 public class JavaProtoAspect extends NativeAspectClass implements ConfiguredAspectFactory {
 
-  private final Label hostJdkAttribute;
   private final Label javaToolchainAttribute;
 
   private static LabelLateBoundDefault<?> getSpeedProtoToolchainLabel(String defaultValue) {
@@ -83,7 +80,6 @@ public class JavaProtoAspect extends NativeAspectClass implements ConfiguredAspe
     this.rpcSupport = Preconditions.checkNotNull(rpcSupport);
     this.defaultSpeedProtoToolchainLabel =
         Preconditions.checkNotNull(defaultSpeedProtoToolchainLabel);
-    this.hostJdkAttribute = JavaSemantics.hostJdkAttribute(env);
     this.javaToolchainAttribute = JavaSemantics.javaToolchainAttribute(env);
   }
 
@@ -132,18 +128,12 @@ public class JavaProtoAspect extends NativeAspectClass implements ConfiguredAspe
             .advertiseProvider(JavaProtoLibraryAspectProvider.class)
             .advertiseProvider(
                 ImmutableList.of(StarlarkProviderIdentifier.forKey(JavaInfo.PROVIDER.getKey())))
-            .advertiseProvider(ImmutableList.of(JavaStarlarkApiProvider.STARLARK_NAME))
             .add(
                 attr(JavaProtoAspectCommon.SPEED_PROTO_TOOLCHAIN_ATTR, LABEL)
-                    // TODO(carmi): reinstate mandatoryNativeProviders(ProtoLangToolchainProvider)
+                    // TODO(carmi): reinstate mandatoryBuiltinProviders(ProtoLangToolchainProvider)
                     // once it's in a Bazel release.
                     .legacyAllowAnyFileType()
                     .value(getSpeedProtoToolchainLabel(defaultSpeedProtoToolchainLabel)))
-            .add(
-                attr(HOST_JAVA_RUNTIME_ATTRIBUTE_NAME, LABEL)
-                    .cfg(HostTransition.createFactory())
-                    .value(hostJdkAttribute)
-                    .mandatoryProviders(ToolchainInfo.PROVIDER.id()))
             .add(
                 attr(JavaRuleClasses.JAVA_TOOLCHAIN_ATTRIBUTE_NAME, LABEL)
                     .useOutputLicenses()
@@ -228,15 +218,16 @@ public class JavaProtoAspect extends NativeAspectClass implements ConfiguredAspe
         // TODO(carmi): Expose to native rules
         JavaRuleOutputJarsProvider ruleOutputJarsProvider =
             JavaRuleOutputJarsProvider.builder()
-                .addOutputJar(
-                    outputJar,
-                    compileTimeJar,
-                    null /* manifestProto */,
-                    ImmutableList.of(sourceJar))
+                .addJavaOutput(
+                    JavaOutput.builder()
+                        .setClassJar(outputJar)
+                        .setCompileJar(compileTimeJar)
+                        .addSourceJar(sourceJar)
+                        .build())
                 .build();
         JavaSourceJarsProvider sourceJarsProvider =
             JavaSourceJarsProvider.create(
-                NestedSetBuilder.<Artifact>emptySet(Order.STABLE_ORDER),
+                NestedSetBuilder.create(Order.STABLE_ORDER, sourceJar),
                 ImmutableList.of(sourceJar));
 
         aspect.addProvider(ruleOutputJarsProvider).addProvider(sourceJarsProvider);
@@ -258,9 +249,7 @@ public class JavaProtoAspect extends NativeAspectClass implements ConfiguredAspe
       javaInfo.addProvider(JavaCompilationArgsProvider.class, generatedCompilationArgsProvider);
       aspect.addNativeDeclaredProvider(
           createCcLinkingInfo(ruleContext, aspectCommon.getProtoRuntimeDeps()));
-      JavaStarlarkApiProvider javaStarlarkApiProvider = JavaStarlarkApiProvider.fromRuleContext();
       aspect
-          .addStarlarkTransitiveInfo(JavaStarlarkApiProvider.NAME, javaStarlarkApiProvider)
           .addNativeDeclaredProvider(javaInfo.build())
           .addProvider(
               new JavaProtoLibraryAspectProvider(

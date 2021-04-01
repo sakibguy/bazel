@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.rules.java;
 
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
@@ -25,6 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
+import com.google.common.flogger.GoogleLogger;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.devtools.build.lib.actions.AbstractAction;
 import com.google.devtools.build.lib.actions.ActionContinuationOrResult;
@@ -90,6 +92,7 @@ import net.starlark.java.eval.StarlarkList;
 @ThreadCompatible
 @Immutable
 public class JavaCompileAction extends AbstractAction implements CommandAction {
+  private static final GoogleLogger logger = GoogleLogger.forEnclosingClass();
   private static final ResourceSet LOCAL_RESOURCES =
       ResourceSet.createWithRamCpu(/* memoryMb= */ 750, /* cpuUsage= */ 1);
   private static final UUID GUID = UUID.fromString("e423747c-2827-49e6-b961-f6c08c10bb51");
@@ -186,7 +189,7 @@ public class JavaCompileAction extends AbstractAction implements CommandAction {
       ActionKeyContext actionKeyContext,
       @Nullable Artifact.ArtifactExpander artifactExpander,
       Fingerprint fp)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     fp.addUUID(GUID);
     fp.addInt(classpathMode.ordinal());
     executableLine.addToFingerprint(actionKeyContext, artifactExpander, fp);
@@ -262,7 +265,7 @@ public class JavaCompileAction extends AbstractAction implements CommandAction {
       ActionExecutionContext actionExecutionContext,
       ReducedClasspath reducedClasspath,
       boolean fallback)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     CustomCommandLine.Builder classpathLine = CustomCommandLine.builder();
     if (fallback) {
       classpathLine.addExecPaths("--classpath", transitiveInputs);
@@ -295,13 +298,13 @@ public class JavaCompileAction extends AbstractAction implements CommandAction {
             .build();
     return new JavaSpawn(
         expandedCommandLines,
-        getEffectiveEnvironment(actionExecutionContext),
+        getEffectiveEnvironment(actionExecutionContext.getClientEnv()),
         executionInfo,
         inputs);
   }
 
   private JavaSpawn getFullSpawn(ActionExecutionContext actionExecutionContext)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     CommandLines.ExpandedCommandLines expandedCommandLines =
         getCommandLines()
             .expand(
@@ -310,7 +313,7 @@ public class JavaCompileAction extends AbstractAction implements CommandAction {
                 configuration.getCommandLineLimits());
     return new JavaSpawn(
         expandedCommandLines,
-        getEffectiveEnvironment(actionExecutionContext),
+        getEffectiveEnvironment(actionExecutionContext.getClientEnv()),
         executionInfo,
         NestedSetBuilder.<Artifact>stableOrder()
             .addTransitive(mandatoryInputs)
@@ -318,11 +321,12 @@ public class JavaCompileAction extends AbstractAction implements CommandAction {
             .build());
   }
 
-  private ImmutableMap<String, String> getEffectiveEnvironment(
-      ActionExecutionContext actionExecutionContext) {
+  @Override
+  public ImmutableMap<String, String> getEffectiveEnvironment(Map<String, String> clientEnv)
+      throws CommandLineExpansionException {
     LinkedHashMap<String, String> effectiveEnvironment =
         Maps.newLinkedHashMapWithExpectedSize(env.size());
-    env.resolve(effectiveEnvironment, actionExecutionContext.getClientEnv());
+    env.resolve(effectiveEnvironment, clientEnv);
     return ImmutableMap.copyOf(effectiveEnvironment);
   }
 
@@ -436,7 +440,7 @@ public class JavaCompileAction extends AbstractAction implements CommandAction {
 
   @Override
   public ExtraActionInfo.Builder getExtraActionInfo(ActionKeyContext actionKeyContext)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     ExtraActionInfo.Builder builder = super.getExtraActionInfo(actionKeyContext);
     CommandLines commandLinesWithoutExecutable =
         CommandLines.builder()
@@ -498,7 +502,7 @@ public class JavaCompileAction extends AbstractAction implements CommandAction {
   }
 
   @Override
-  public Sequence<String> getStarlarkArgv() throws EvalException {
+  public Sequence<String> getStarlarkArgv() throws EvalException, InterruptedException {
     try {
       return StarlarkList.immutableCopyOf(getArguments());
     } catch (CommandLineExpansionException ex) {
@@ -513,7 +517,7 @@ public class JavaCompileAction extends AbstractAction implements CommandAction {
   }
 
   @Override
-  public List<String> getArguments() throws CommandLineExpansionException {
+  public List<String> getArguments() throws CommandLineExpansionException, InterruptedException {
     return ImmutableList.copyOf(getCommandLines().allArguments());
   }
 
@@ -618,10 +622,15 @@ public class JavaCompileAction extends AbstractAction implements CommandAction {
           return ActionContinuationOrResult.of(ActionResult.create(results));
         }
 
+        logger.atInfo().atMostEvery(1, SECONDS).log(
+            "Failed reduced classpath compilation for %s", JavaCompileAction.this.prettyPrint());
         // Fall back to running with the full classpath. This requires first deleting potential
         // artifacts generated by the reduced action and clearing the metadata caches.
         try {
-          deleteOutputs(actionExecutionContext.getExecRoot(), /* bulkDeleter= */ null);
+          deleteOutputs(
+              actionExecutionContext.getExecRoot(),
+              actionExecutionContext.getPathResolver(),
+              /*bulkDeleter=*/ null);
         } catch (IOException e) {
           throw new EnvironmentalExecException(
                   e,

@@ -34,6 +34,7 @@ import com.google.devtools.build.lib.buildtool.buildevent.NoAnalyzeEvent;
 import com.google.devtools.build.lib.buildtool.buildevent.TestFilteringCompleteEvent;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.TargetParsingException;
+import com.google.devtools.build.lib.cmdline.TargetPattern;
 import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.pkgcache.LoadingFailedException;
@@ -50,10 +51,10 @@ import com.google.devtools.build.lib.skyframe.PrecomputedValue;
 import com.google.devtools.build.lib.skyframe.TargetPatternPhaseValue;
 import com.google.devtools.build.lib.util.AbruptExitException;
 import com.google.devtools.build.lib.util.DetailedExitCode;
-import com.google.devtools.build.lib.util.Pair;
 import com.google.devtools.build.lib.util.RegexFilter;
 import com.google.devtools.common.options.OptionsParsingException;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -203,6 +204,9 @@ public final class AnalysisPhaseRunner {
     Stopwatch timer = Stopwatch.createStarted();
     env.getReporter().handle(Event.progress("Loading complete.  Analyzing..."));
 
+    ImmutableSet<String> explicitTargetPatterns =
+        getExplicitTargetPatterns(env, request.getTargets());
+
     BuildView view =
         new BuildView(
             env.getDirectories(),
@@ -214,26 +218,25 @@ public final class AnalysisPhaseRunner {
             loadingResult,
             targetOptions,
             multiCpu,
+            explicitTargetPatterns,
             request.getAspects(),
             request.getViewOptions(),
             request.getKeepGoing(),
+            request.getCheckForActionConflicts(),
             request.getLoadingPhaseThreadCount(),
             request.getTopLevelArtifactContext(),
             env.getReporter(),
             env.getEventBus());
-
-    Pair<Integer, Integer> tcal = view.getTargetsConfiguredAndLoaded();
 
     // TODO(bazel-team): Merge these into one event.
     env.getEventBus()
         .post(
             new AnalysisPhaseCompleteEvent(
                 analysisResult.getTargetsToBuild(),
-                /* targetsLoaded */ tcal.second.intValue(),
-                /* targetsConfigured */ tcal.first.intValue(),
+                view.getEvaluatedCounts(),
+                view.getEvaluatedActionsCounts(),
                 timer.stop().elapsed(TimeUnit.MILLISECONDS),
                 view.getAndClearPkgManagerStatistics(),
-                view.getActionsConstructed(),
                 env.getSkyframeExecutor().wasAnalysisCacheDiscardedAndResetBit()));
     ImmutableSet<BuildConfigurationValue.Key> configurationKeys =
         Stream.concat(
@@ -259,6 +262,7 @@ public final class AnalysisPhaseRunner {
             new TestFilteringCompleteEvent(
                 analysisResult.getTargetsToBuild(),
                 analysisResult.getTargetsToTest(),
+                analysisResult.getTargetsToSkip(),
                 configurationMap));
     return analysisResult;
   }
@@ -293,5 +297,50 @@ public final class AnalysisPhaseRunner {
               Event.info(
                   "Found " + targetCount + (targetCount == 1 ? " target..." : " targets...")));
     }
+  }
+
+  /**
+   * Turns target patterns from the command line into parsed equivalents for single targets.
+   *
+   * <p>Globbing targets like ":all" and "..." are ignored here and will not be in the returned set.
+   *
+   * @param env the action's environment.
+   * @param requestedTargetPatterns the list of target patterns specified on the command line.
+   * @return the set of stringified labels of target patterns that represent single targets. The
+   *     stringified labels are in the "unambiguous canonical form".
+   * @throws ViewCreationFailedException if a pattern fails to parse for some reason.
+   */
+  private static ImmutableSet<String> getExplicitTargetPatterns(
+      CommandEnvironment env, List<String> requestedTargetPatterns)
+      throws ViewCreationFailedException {
+    ImmutableSet.Builder<String> explicitTargetPatterns = ImmutableSet.builder();
+    TargetPattern.Parser parser = new TargetPattern.Parser(env.getRelativeWorkingDirectory());
+
+    for (String requestedTargetPattern : requestedTargetPatterns) {
+      if (requestedTargetPattern.startsWith("-")) {
+        // Excluded patterns are by definition not explicitly requested so we can move on to the
+        // next target pattern.
+        continue;
+      }
+
+      // Parse the pattern. This should always work because this is at least the second time we're
+      // doing it. The previous time is in runAnalysisPhase(). Still, if parsing does fail we
+      // propagate the exception up.
+      TargetPattern parsedPattern;
+      try {
+        parsedPattern = parser.parse(requestedTargetPattern);
+      } catch (TargetParsingException e) {
+        throw new ViewCreationFailedException(
+            "Failed to parse target pattern even though it was previously parsed successfully",
+            e.getDetailedExitCode().getFailureDetail(),
+            e);
+      }
+
+      if (parsedPattern.getType() == TargetPattern.Type.SINGLE_TARGET) {
+        explicitTargetPatterns.add(parsedPattern.getSingleTargetPath());
+      }
+    }
+
+    return ImmutableSet.copyOf(explicitTargetPatterns.build());
   }
 }

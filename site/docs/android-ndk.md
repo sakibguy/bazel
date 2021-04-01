@@ -8,18 +8,6 @@ title: Using the Android Native Development Kit with Bazel
 _If you're new to Bazel, please start with the [Building Android with
 Bazel](tutorial/android-app.html) tutorial._
 
-## Table of contents
-
-- [Overview](#overview)
-- [Prerequisites](#prerequisites)
-- [Quick start](#quick-start)
-- [Example setup](#example-setup)
-- [Configuring the STL](#configuring-the-stl)
-- [Configuring the target ABI](#configuring-the-target-abi)
-- [Selecting a C++ standard](#selecting-a-c-standard)
-- [How it works: introducing Android configuration transitions](#how-it-works-introducing-android-configuration-transitions)
-- [Building a `cc_library` for Android without using `android_binary`](#building-a-cc_library-for-android-without-using-android_binary)
-
 ## Overview
 
 Bazel can run in many different build configurations, including several that use
@@ -118,7 +106,7 @@ ABI](#configuring-the-target-abi).
 This example is available in the [Bazel examples
 repository](https://github.com/bazelbuild/examples/tree/master/android/ndk).
 
-In the `BUILD.bazel` file, we define three targets with the `android_binary`,
+In the `BUILD.bazel` file, three targets are defined with the `android_binary`,
 `android_library` and `cc_library` rules.
 
 The `android_binary` top-level target builds the APK.
@@ -388,12 +376,12 @@ bazel build //my/cc/jni:target \
       --host_crosstool_top=@bazel_tools//tools/cpp:toolchain
 ```
 
-Here, we specify that top-level `cc_library` and `cc_binary` targets are built
+In this example, the top-level `cc_library` and `cc_binary` targets are built
 using the NDK toolchain. However, this causes Bazel's own host tools to be built
 with the NDK toolchain (and thus for Android), because the host toolchain is
-copied from the target toolchain. To work around this, we specify the value of
-`--host_crosstool_top` to be `@bazel_tools//tools/cpp:toolchain` to explicitly
-set the host's C++ toolchain.
+copied from the target toolchain. To work around this, specify the value of
+`--host_crosstool_top` to be `@bazel_tools//tools/cpp:toolchain` to
+explicitly set the host's C++ toolchain.
 
 With this approach, the entire build tree is affected.
 

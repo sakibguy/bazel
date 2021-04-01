@@ -3,7 +3,7 @@ layout: documentation
 title: User's guide
 ---
 
-# A user's guide to Bazel
+# A User's Guide to Bazel
 
 To run Bazel, go to your base [workspace](build-ref.html#workspace) directory
 or any of its subdirectories and type `bazel`.
@@ -101,10 +101,10 @@ INFO: Elapsed time: 0.144s, Critical Path: 0.00s
 INFO: Build completed successfully, 1 total action
 ```
 
-We see a "null" build: in this case, there are no packages to re-load, since
-nothing has changed, and no build steps to execute. (If something had changed in
+You see a "null" build: in this case, there are no packages to reload, since
+nothing changed, and no build steps to execute. (If something changed in
 "foo" or some of its dependencies, resulting in the re-execution of some build
-actions, we would call it an "incremental" build, not a "null" build.)
+actions, you would call it an "incremental" build, not a "null" build.)
 
 Before you can start a build, you will need a Bazel workspace. This is simply a
 directory tree that contains all the source files needed to build your
@@ -263,7 +263,7 @@ them.
 
 By default, Bazel will download and symlink external dependencies during the
 build. However, this can be undesirable, either because you'd like to know
-when new external dependendencies are added or because you'd like to
+when new external dependencies are added or because you'd like to
 "prefetch" dependencies (say, before a flight where you'll be offline). If you
 would like to prevent new dependencies from being added during builds, you
 can specify the `--fetch=false` flag. Note that this flag only
@@ -776,8 +776,17 @@ before the command (`build`, `test`, etc).
 4.  **The user-specified RC file**, if specified with
     <code>--bazelrc=<var>file</var></code>
 
-    This flag is optional. However, if the flag is specified, then the file must
-    exist.
+    This flag is optional but can also be specified multiple times.
+
+    `/dev/null` indicates that all further `--bazelrc`s will be ignored, which
+     is useful to disable the search for a user rc file, e.g. in release builds.
+
+    For example:
+    ```
+    --bazelrc=x.rc --bazelrc=y.rc --bazelrc=/dev/null --bazelrc=z.rc
+    ```
+    1. `x.rc` and `y.rc` are read.
+    2. `z.rc` is ignored due to the prior `/dev/null`.
 
 In addition to this optional configuration file, Bazel looks for a global rc
 file. For more details, see the [global bazelrc section](#global_bazelrc).
@@ -979,7 +988,7 @@ lock used by the user's interactive Bazel commands. If the user issues
 long-running commands such as builds, your script will have to wait for those
 commands to complete before it can continue.
 
-### Notes about Server Mode
+### Notes about server mode
 
 By default, Bazel uses a long-running [server process](#client/server) as an
 optimization. When running Bazel in a script, don't forget to call `shutdown`
@@ -999,8 +1008,8 @@ Bazel execution can result in following exit codes:
     Bad Environment Variables. Your command line must be modified.
 -   `8` - Build Interrupted but we terminated with an orderly shutdown.
 -   `32` - External Environment Failure not on this machine.
--   `33` - OOM failure. You need to modify your command line.
 
+-   `33` - Bazel ran out of memory and crashed. You need to modify your command line.
 -   `34` - Reserved for Google-internal use.
 -   `35` - Reserved for Google-internal use.
 -   `36` - Local Environmental Issue, suspected permanent.
@@ -1008,6 +1017,7 @@ Bazel execution can result in following exit codes:
 -   `38` - Reserved for Google-internal use.
 -   `41-44` - Reserved for Google-internal use.
 -   `45` - Error publishing results to the Build Event Service.
+-   `47` - Reserved for Google-internal use.
 
 **Return codes for commands `bazel build`, `bazel test`:**
 
@@ -1075,5 +1085,5 @@ these messages.
 
 ## Troubleshooting performance by profiling
 
-See the [Performance Profiling](performance.html#performance-profiling) section.
+See the [Performance Profiling](skylark/performance.md#performance-profiling) section.
 

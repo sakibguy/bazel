@@ -2,10 +2,8 @@
 layout: documentation
 title: Aquery (action graph query)
 ---
-<h1>Aquery (action graph query)</h1>
+<h1>Action Graph Query (aquery)</h1>
 
-
-<h2 id='overview'>Overview</h2>
 
 <p>
   The <code>aquery</code> command allows you to query for actions in your build graph.
@@ -14,7 +12,7 @@ title: Aquery (action graph query)
 </p>
 
 <p>
-  <code>aquery</code> is useful when we are interested in the properties of the Actions/Artifacts
+  <code>aquery</code> is useful when you are interested in the properties of the Actions/Artifacts
   generated from the Configured Target Graph. For example, the actual commands run
   and their inputs/outputs/mnemonics.
 </p>
@@ -79,7 +77,7 @@ $ bazel aquery 'deps(//src/target_a)'
 $ bazel aquery 'inputs(".*cpp", deps(//src/target_a))'
 </pre>
 
-<h2 id='functions'>Aquery functions</h2>
+<h2 id='functions'>Using aquery functions</h2>
 
 <p>There are currently 3 <code>aquery</code> functions:</p>
 <ul>
@@ -141,6 +139,7 @@ $ bazel aquery 'inputs(".*cpp", deps(//src/target_a))'
 <p>
   The default output format (<code>text</code>) is human-readable,
   use <code>proto</code>, <code>textproto</code>, or <code>jsonproto</code> for machine-readable format.
+  The proto message is <code>analysis.ActionGraphContainer</code>.
 </p>
 
 <h4><code class='flag'>--include_commandline, default=true</code></h4>
@@ -155,7 +154,7 @@ $ bazel aquery 'inputs(".*cpp", deps(//src/target_a))'
   Includes names of the action inputs and outputs in the output (potentially large).
 </p>
 
-<h4><code class='flag'>--include_aspects, default=false</code></h4>
+<h4><code class='flag'>--include_aspects, default=true</code></h4>
 
 <p>
   Whether to include Aspect-generated actions in the output.
@@ -270,6 +269,7 @@ $ bazel aquery 'inputs(".*cpp", deps(//src/target_a))'
   To use it, clone the repository to your local machine. An example usage:
 </p>
 
+
 <pre>
   $ bazel run //tools/aquery_differ -- \
   --before=/path/to/before.proto \
@@ -278,6 +278,7 @@ $ bazel aquery 'inputs(".*cpp", deps(//src/target_a))'
   --attrs=cmdline \
   --attrs=inputs
 </pre>
+
 
 <p>
   The above command returns the difference between the <code>before</code> and <code>after</code> aquery outputs:
@@ -306,7 +307,7 @@ $ bazel aquery 'inputs(".*cpp", deps(//src/target_a))'
 <p><code class='flag'>--before, --after</code>: The aquery output files to be compared</p>
 <p>
   <code class='flag'>--input_type=(proto|text_proto), default=proto</code>: the format of the input
-  files. We currently support <code>proto</code> and <code>textproto</code> aquery output.
+  files. Support is provided for <code>proto</code> and <code>textproto</code> aquery output.
 </p>
 <p>
   <code class='flag'>--attrs=(cmdline|inputs), default=cmdline</code>: the attributes of actions
@@ -372,7 +373,7 @@ $ bazel aquery 'inputs(".*cpp", deps(//src/target_a))'
 
 <h2 id='known-issues'>Known issues</h2>
 
-<h3 id='shared-actions'>Handling Shared Actions</h3>
+<h3 id='shared-actions'>Handling shared actions</h3>
 
 <p>
   Sometimes actions are
@@ -383,7 +384,7 @@ $ bazel aquery 'inputs(".*cpp", deps(//src/target_a))'
   <a href="https://source.bazel.build/bazel/+/master:src/main/java/com/google/devtools/build/lib/actions/Actions.java;l=241;drc=003b8734036a07b496012730964ac220f486b61f">simply considered as one</a> and only executed once.
   However, aquery operates on the pre-execution, post-analysis action graph, and hence treats these
   like separate actions whose output Artifacts have the exact same <code>execPath</code>. As a result,
-  we'll have equivalent Artifacts appearing duplicated.
+  equivalent Artifacts appear duplicated.
 </p>
 <p>
   The list of aquery issues/planned features can be found on

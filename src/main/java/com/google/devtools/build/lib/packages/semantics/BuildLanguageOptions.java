@@ -18,6 +18,7 @@ package com.google.devtools.build.lib.packages.semantics;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Interner;
 import com.google.devtools.build.lib.concurrent.BlazeInterners;
+import com.google.devtools.common.options.Converters.CommaSeparatedNonEmptyOptionListConverter;
 import com.google.devtools.common.options.Converters.CommaSeparatedOptionListConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionDocumentationCategory;
@@ -45,9 +46,8 @@ import net.starlark.java.eval.StarlarkSemantics;
  *       #toStarlarkSemantics}.
  *   <li>Define a new {@code StarlarkSemantics.Key} or {@code StarlarkSemantics} boolean flag
  *       identifier.
- *   <li>Add a line to set the new field in both {@link
- *       StarlarkSemanticsConsistencyTest#buildRandomOptions} and {@link
- *       StarlarkSemanticsConsistencyTest#buildRandomSemantics}.
+ *   <li>Add a line to set the new field in both {@link ConsistencyTest#buildRandomOptions} and
+ *       {@link ConsistencyTest#buildRandomSemantics}.
  *   <li>Update manual documentation in site/docs/skylark/backward-compatibility.md. Also remember
  *       to update this when flipping a flag's default value.
  *   <li>Boolean semantic flags can toggle StarlarkMethod-annotated Java methods (or their
@@ -74,26 +74,58 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
               + "ctx.build_setting_value.")
   public boolean experimentalBuildSettingApi;
 
-  // TODO(#11437): Implement the flag values listed in the below help string; delete the special
-  // empty string value so that it's on unconditionally.
+  // TODO(#11437): Delete the special empty string value so that it's on unconditionally.
   @Option(
       name = "experimental_builtins_bzl_path",
-      defaultValue = "",
+      defaultValue = "%bundled%",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
       effectTags = {OptionEffectTag.LOSES_INCREMENTAL_STATE, OptionEffectTag.BUILD_FILE_SEMANTICS},
       metadataTags = {OptionMetadataTag.EXPERIMENTAL},
       help =
-          "This flag tells Bazel how to find the \"@builtins\" .bzl files that govern how "
+          "This flag tells Bazel how to find the \"@_builtins\" .bzl files that govern how "
               + "predeclared symbols for BUILD and .bzl files are defined. This flag is only "
-              + "intended for Bazel developers, to help when writing @builtins .bzl code. "
-              + "Ordinarily this value is set to \"%install_base%\", which means to use the "
-              + "builtins_bzl/ directory located in the install base. However, it can be set to "
-              + "the path to the root of a Bazel source tree workspace, in which case the bzl "
-              + "sources underneath that workspace are used. If the value is literally "
-              + "\"%workspace%\", the root of the current workspace is used; this should only be "
-              + "set when running Bazel within its own source tree. Finally, a value of the empty "
-              + "string (\"\") disables the builtins injection mechanism entirely.")
+              + "intended for Bazel developers, to help when writing @_builtins .bzl code. "
+              + "Ordinarily this value is set to \"%bundled%\", which means to use the "
+              + "builtins_bzl/ directory packaged in the Bazel binary. However, it can be set to "
+              + "the path (relative to the root of the current workspace) of an alternate "
+              + "builtins_bzl/ directory, such as one in a Bazel source tree workspace. A literal "
+              + "value of \"%workspace%\" is equivalent to the relative package path of "
+              + "builtins_bzl/ within a Bazel source tree; this should only be used when running "
+              + "Bazel within its own source tree. Finally, a value of the empty string disables "
+              + "the builtins injection mechanism entirely.")
   public String experimentalBuiltinsBzlPath;
+
+  @Option(
+      name = "experimental_builtins_dummy",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help = "Enables an internal dummy symbol used to test builtins injection.")
+  public boolean experimentalBuiltinsDummy;
+
+  @Option(
+      name = "experimental_builtins_injection_override",
+      converter = CommaSeparatedNonEmptyOptionListConverter.class,
+      defaultValue = "null",
+      allowMultiple = true,
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help =
+          "A comma-separated list of symbol names prefixed by a + or - character, indicating which"
+              + " symbols from `@_builtins//:exports.bzl` to inject, overriding their default"
+              + " injection status. Precisely, this works as follows. Each dict key of"
+              + " `exported_toplevels` or `exported_rules` has the form `foo`, `+foo`, or `-foo`."
+              + " The first two forms mean it gets injected by default, while the last form means"
+              + " it does not get injected by default. In the first case (unprefixed), the default"
+              + " is absolute and cannot be overridden. Otherwise, we then consult this options"
+              + " list, and if we see foo occur here, we take the prefix of its last occurrence and"
+              + " use that to decide whether or not to inject. It is a no-op to specify an unknown"
+              + " symbol, or to attempt to not inject a symbol that occurs unprefixed in a dict"
+              + " key.")
+  public List<String> experimentalBuiltinsInjectionOverride;
+
 
   @Option(
       name = "experimental_cc_skylark_api_enabled_packages",
@@ -127,6 +159,15 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   public boolean experimentalGoogleLegacyApi;
 
   @Option(
+      name = "experimental_javawrapcc_api",
+      defaultValue = "true",
+      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help = "If set to true, exposes JavaWrapCcApi.")
+  public boolean experimentalJavaWrapCcApi;
+
+  @Option(
       name = "experimental_ninja_actions",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
@@ -147,17 +188,6 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   public boolean experimentalPlatformsApi;
 
   @Option(
-      name = "experimental_starlark_config_transitions",
-      defaultValue = "true",
-      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
-      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
-      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
-      help =
-          "If set to true, enables creation of configuration transition objects (the "
-              + "`transition()` function) in Starlark.")
-  public boolean experimentalStarlarkConfigTransitions;
-
-  @Option(
       name = "experimental_cc_shared_library",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
@@ -172,7 +202,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
 
   @Option(
       name = "incompatible_require_linker_input_cc_api",
-      defaultValue = "false",
+      defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
       effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS, OptionEffectTag.LOADING_AND_ANALYSIS},
       metadataTags = {
@@ -256,6 +286,21 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
               + " requirements; otherwise tags are not propagated. See"
               + " https://github.com/bazelbuild/bazel/issues/8830 for details.")
   public boolean experimentalAllowTagsPropagation;
+
+  @Option(
+      name = "incompatible_struct_has_no_methods",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
+      effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS},
+      metadataTags = {
+        OptionMetadataTag.INCOMPATIBLE_CHANGE,
+        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
+      },
+      help =
+          "Disables the to_json and to_proto methods of struct, which pollute the struct field"
+              + " namespace. Instead, use json.encode or json.encode_indent for JSON, or"
+              + " proto.encode_text for textproto.")
+  public boolean incompatibleStructHasNoMethods;
 
   @Option(
       name = "incompatible_always_check_depset_elements",
@@ -446,7 +491,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
 
   @Option(
       name = "incompatible_run_shell_command_string",
-      defaultValue = "false",
+      defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
       effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS},
       metadataTags = {
@@ -455,20 +500,6 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
       },
       help = "If set to true, the command parameter of actions.run_shell will only accept string")
   public boolean incompatibleRunShellCommandString;
-
-  @Option(
-      name = "incompatible_string_replace_count",
-      defaultValue = "false",
-      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
-      effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS},
-      metadataTags = {
-        OptionMetadataTag.INCOMPATIBLE_CHANGE,
-        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
-      },
-      help =
-          "If set to true, the `count` parameter of string.replace() is changed to behave as in "
-              + "Python: a negative count is ignored, and a None count is an error")
-  public boolean incompatibleStringReplaceCount;
 
   /** Used in an integration test to confirm that flags are visible to the interpreter. */
   @Option(
@@ -524,7 +555,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
 
   @Option(
       name = "incompatible_restrict_string_escapes",
-      defaultValue = "false",
+      defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
       effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS},
       metadataTags = {
@@ -536,7 +567,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
 
   @Option(
       name = "incompatible_linkopts_to_linklibs",
-      defaultValue = "false",
+      defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
       effectTags = {OptionEffectTag.ACTION_COMMAND_LINES},
       metadataTags = {
@@ -549,18 +580,6 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   public boolean incompatibleLinkoptsToLinklibs;
 
   @Option(
-      name = "incompatible_objc_provider_remove_compile_info",
-      defaultValue = "false",
-      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
-      effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS},
-      metadataTags = {
-        OptionMetadataTag.INCOMPATIBLE_CHANGE,
-        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
-      },
-      help = "If set to true, the ObjcProvider's APIs for compile info/merge_zip will be removed.")
-  public boolean incompatibleObjcProviderRemoveCompileInfo;
-
-  @Option(
       name = "incompatible_java_common_parameters",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
@@ -569,7 +588,9 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
         OptionMetadataTag.INCOMPATIBLE_CHANGE,
         OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
       },
-      help = "If set to true, the jar_file parameter in pack_sources will be removed.")
+      help =
+          "If set to true, the jar_file, and host_javabase parameters in pack_sources and "
+              + "host_javabase in compile will all be removed.")
   public boolean incompatibleJavaCommonParameters;
 
   @Option(
@@ -581,6 +602,28 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
           "The maximum number of Starlark computation steps that may be executed by a BUILD file"
               + " (zero means no limit).")
   public long maxComputationSteps;
+
+  @Option(
+      name = "nested_set_depth_limit",
+      defaultValue = "3500",
+      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      help =
+          "The maximum depth of the graph internal to a depset (also known as NestedSet), above"
+              + " which the depset() constructor will fail.")
+  public int nestedSetDepthLimit;
+
+  @Option(
+      name = "experimental_shadowed_action",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
+      effectTags = {OptionEffectTag.CHANGES_INPUTS, OptionEffectTag.EXECUTION},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help =
+          "If set to true, allows passing an action for Starlark created actions to shadow and use"
+              + " its environment, inputs and discovered inputs combined with the starlark action's"
+              + " environment and inputs during execution.")
+  public boolean experimentalShadowedAction;
 
   /**
    * An interner to reduce the number of StarlarkSemantics instances. A single Blaze instance should
@@ -598,16 +641,14 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
             // <== Add new options here in alphabetic order ==>
             .setBool(EXPERIMENTAL_ALLOW_TAGS_PROPAGATION, experimentalAllowTagsPropagation)
             .set(EXPERIMENTAL_BUILTINS_BZL_PATH, experimentalBuiltinsBzlPath)
-            .set(
-                EXPERIMENTAL_CC_STARLARK_API_ENABLED_PACKAGES,
-                ImmutableList.copyOf(experimentalCcStarlarkApiEnabledPackages))
+            .setBool(EXPERIMENTAL_BUILTINS_DUMMY, experimentalBuiltinsDummy)
+            .set(EXPERIMENTAL_BUILTINS_INJECTION_OVERRIDE, experimentalBuiltinsInjectionOverride)
             .setBool(
                 EXPERIMENTAL_ENABLE_ANDROID_MIGRATION_APIS, experimentalEnableAndroidMigrationApis)
             .setBool(EXPERIMENTAL_GOOGLE_LEGACY_API, experimentalGoogleLegacyApi)
+            .setBool(EXPERIMENTAL_JAVAWRAPCC_API, experimentalJavaWrapCcApi)
             .setBool(EXPERIMENTAL_NINJA_ACTIONS, experimentalNinjaActions)
             .setBool(EXPERIMENTAL_PLATFORMS_API, experimentalPlatformsApi)
-            .setBool(
-                EXPERIMENTAL_STARLARK_CONFIG_TRANSITIONS, experimentalStarlarkConfigTransitions)
             .setBool(EXPERIMENTAL_CC_SHARED_LIBRARY, experimentalCcSharedLibrary)
             .setBool(EXPERIMENTAL_REPO_REMOTE_EXEC, experimentalRepoRemoteExec)
             .setBool(EXPERIMENTAL_DISABLE_EXTERNAL_PACKAGE, experimentalDisableExternalPackage)
@@ -633,8 +674,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
             .setBool(INCOMPATIBLE_NO_IMPLICIT_FILE_EXPORT, incompatibleNoImplicitFileExport)
             .setBool(INCOMPATIBLE_NO_RULE_OUTPUTS_PARAM, incompatibleNoRuleOutputsParam)
             .setBool(INCOMPATIBLE_RUN_SHELL_COMMAND_STRING, incompatibleRunShellCommandString)
-            .setBool(
-                StarlarkSemantics.INCOMPATIBLE_STRING_REPLACE_COUNT, incompatibleStringReplaceCount)
+            .setBool(INCOMPATIBLE_STRUCT_HAS_NO_METHODS, incompatibleStructHasNoMethods)
             .setBool(
                 INCOMPATIBLE_VISIBILITY_PRIVATE_ATTRIBUTES_AT_DEFINITION,
                 incompatibleVisibilityPrivateAttributesAtDefinition)
@@ -649,10 +689,9 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
             .setBool(INCOMPATIBLE_REQUIRE_LINKER_INPUT_CC_API, incompatibleRequireLinkerInputCcApi)
             .setBool(INCOMPATIBLE_RESTRICT_STRING_ESCAPES, incompatibleRestrictStringEscapes)
             .setBool(INCOMPATIBLE_LINKOPTS_TO_LINKLIBS, incompatibleLinkoptsToLinklibs)
-            .setBool(
-                INCOMPATIBLE_OBJC_PROVIDER_REMOVE_COMPILE_INFO,
-                incompatibleObjcProviderRemoveCompileInfo)
             .set(MAX_COMPUTATION_STEPS, maxComputationSteps)
+            .set(NESTED_SET_DEPTH_LIMIT, nestedSetDepthLimit)
+            .setBool(EXPERIMENTAL_SHADOWED_ACTION, experimentalShadowedAction)
             .build();
     return INTERNER.intern(semantics);
   }
@@ -668,6 +707,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   // booleans: the +/- prefix indicates the default value (true/false).
   public static final String EXPERIMENTAL_ALLOW_TAGS_PROPAGATION =
       "-experimental_allow_tags_propagation";
+  public static final String EXPERIMENTAL_BUILTINS_DUMMY = "-experimental_builtins_dummy";
   public static final String EXPERIMENTAL_CC_SHARED_LIBRARY = "-experimental_cc_shared_library";
   public static final String EXPERIMENTAL_DISABLE_EXTERNAL_PACKAGE =
       "-experimental_disable_external_package";
@@ -675,13 +715,12 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
       "-experimental_enable_android_migration_apis";
   public static final String EXPERIMENTAL_EXEC_GROUPS = "-experimental_exec_groups";
   public static final String EXPERIMENTAL_GOOGLE_LEGACY_API = "-experimental_google_legacy_api";
+  public static final String EXPERIMENTAL_JAVAWRAPCC_API = "+experimental_javawrapcc_api";
   public static final String EXPERIMENTAL_NINJA_ACTIONS = "-experimental_ninja_actions";
   public static final String EXPERIMENTAL_PLATFORMS_API = "-experimental_platforms_api";
   public static final String EXPERIMENTAL_REPO_REMOTE_EXEC = "-experimental_repo_remote_exec";
   public static final String EXPERIMENTAL_SIBLING_REPOSITORY_LAYOUT =
       "-experimental_sibling_repository_layout";
-  public static final String EXPERIMENTAL_STARLARK_CONFIG_TRANSITIONS =
-      "+experimental_starlark_config_transitions";
   public static final String INCOMPATIBLE_ALLOW_TAGS_PROPAGATION =
       "-incompatible_allow_tags_propagation";
   public static final String INCOMPATIBLE_ALWAYS_CHECK_DEPSET_ELEMENTS =
@@ -703,35 +742,36 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   public static final String INCOMPATIBLE_JAVA_COMMON_PARAMETERS =
       "-incompatible_java_common_parameters";
   public static final String INCOMPATIBLE_LINKOPTS_TO_LINKLIBS =
-      "-incompatible_linkopts_to_linklibs";
+      "+incompatible_linkopts_to_linklibs";
   public static final String INCOMPATIBLE_NEW_ACTIONS_API = "+incompatible_new_actions_api";
   public static final String INCOMPATIBLE_NO_ATTR_LICENSE = "+incompatible_no_attr_license";
   public static final String INCOMPATIBLE_NO_IMPLICIT_FILE_EXPORT =
       "-incompatible_no_implicit_file_export";
   public static final String INCOMPATIBLE_NO_RULE_OUTPUTS_PARAM =
       "-incompatible_no_rule_outputs_param";
-  public static final String INCOMPATIBLE_OBJC_PROVIDER_REMOVE_COMPILE_INFO =
-      "-incompatible_objc_provider_remove_compile_info";
   public static final String INCOMPATIBLE_REQUIRE_LINKER_INPUT_CC_API =
-      "-incompatible_require_linker_input_cc_api";
+      "+incompatible_require_linker_input_cc_api";
   public static final String INCOMPATIBLE_RESTRICT_STRING_ESCAPES =
-      "-incompatible_restrict_string_escapes";
+      "+incompatible_restrict_string_escapes";
   public static final String INCOMPATIBLE_RUN_SHELL_COMMAND_STRING =
-      "-incompatible_run_shell_command_string";
+      "+incompatible_run_shell_command_string";
+  public static final String INCOMPATIBLE_STRUCT_HAS_NO_METHODS =
+      "-incompatible_struct_has_no_methods";
   public static final String INCOMPATIBLE_USE_CC_CONFIGURE_FROM_RULES_CC =
       "-incompatible_use_cc_configure_from_rules";
   public static final String INCOMPATIBLE_VISIBILITY_PRIVATE_ATTRIBUTES_AT_DEFINITION =
       "-incompatible_visibility_private_attributes_at_definition";
   public static final String RECORD_RULE_INSTANTIATION_CALLSTACK =
       "+record_rule_instantiation_callstack";
+  public static final String EXPERIMENTAL_SHADOWED_ACTION = "-experimental_shadowed_action";
 
   // non-booleans
   public static final StarlarkSemantics.Key<String> EXPERIMENTAL_BUILTINS_BZL_PATH =
-      new StarlarkSemantics.Key<>("experimental_builtins_bzl_path", "");
-  public static final StarlarkSemantics.Key<ImmutableList<String>>
-      EXPERIMENTAL_CC_STARLARK_API_ENABLED_PACKAGES =
-          new StarlarkSemantics.Key<>(
-              "experimental_cc_starlark_api_enabled_packages", ImmutableList.of());
+      new StarlarkSemantics.Key<>("experimental_builtins_bzl_path", "%bundled%");
+  public static final StarlarkSemantics.Key<List<String>> EXPERIMENTAL_BUILTINS_INJECTION_OVERRIDE =
+      new StarlarkSemantics.Key<>("experimental_builtins_injection_override", ImmutableList.of());
   public static final StarlarkSemantics.Key<Long> MAX_COMPUTATION_STEPS =
       new StarlarkSemantics.Key<>("max_computation_steps", 0L);
+  public static final StarlarkSemantics.Key<Integer> NESTED_SET_DEPTH_LIMIT =
+      new StarlarkSemantics.Key<>("nested_set_depth_limit", 3500);
 }

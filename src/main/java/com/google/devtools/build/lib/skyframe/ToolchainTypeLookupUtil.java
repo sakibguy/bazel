@@ -19,6 +19,7 @@ import static java.util.stream.Collectors.joining;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.ConfiguredTargetValue;
 import com.google.devtools.build.lib.analysis.platform.PlatformProviderUtils;
 import com.google.devtools.build.lib.analysis.platform.ToolchainTypeInfo;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -136,7 +137,8 @@ public class ToolchainTypeLookupUtil {
     }
 
     InvalidToolchainTypeException(Label label, ConfiguredValueCreationException e) {
-      super(formatError(label, DEFAULT_ERROR), e);
+      // Just propagate the inner exception, because it's directly actionable.
+      super(e);
     }
 
     public InvalidToolchainTypeException(Label label, NoSuchThingException e) {

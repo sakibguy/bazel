@@ -14,8 +14,6 @@
 
 package com.google.devtools.build.lib.rules.objc;
 
-import static com.google.devtools.build.lib.rules.objc.CompilationSupport.IncludeProcessingType.INCLUDE_SCANNING;
-
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.RuleErrorConsumer;
@@ -31,17 +29,12 @@ import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.HeadersCheckingMode;
 import com.google.devtools.build.lib.rules.cpp.CppSemantics;
 import com.google.devtools.build.lib.rules.cpp.HeaderDiscovery.DotdPruningMode;
-import com.google.devtools.build.lib.rules.cpp.IncludeProcessing;
-import com.google.devtools.build.lib.rules.objc.CompilationSupport.IncludeProcessingType;
 
 /**
  * CppSemantics for objc builds.
  */
 public class ObjcCppSemantics implements CppSemantics {
 
-  private final IncludeProcessingType includeProcessingType;
-  private final IncludeProcessing includeProcessing;
-  private final ObjcConfiguration config;
   private final IntermediateArtifacts intermediateArtifacts;
   private final BuildConfiguration buildConfiguration;
   private final boolean enableModules;
@@ -49,24 +42,14 @@ public class ObjcCppSemantics implements CppSemantics {
   /**
    * Creates an instance of ObjcCppSemantics
    *
-   * @param includeProcessingType The type of include processing to be run.
-   * @param includeProcessing the closure providing the strategy for processing of includes for
-   *     actions
-   * @param config the ObjcConfiguration for this build
    * @param intermediateArtifacts used to create headers_list artifacts
    * @param buildConfiguration the build configuration for this build
    * @param enableModules whether modules are enabled
    */
   public ObjcCppSemantics(
-      IncludeProcessingType includeProcessingType,
-      IncludeProcessing includeProcessing,
-      ObjcConfiguration config,
       IntermediateArtifacts intermediateArtifacts,
       BuildConfiguration buildConfiguration,
       boolean enableModules) {
-    this.includeProcessingType = includeProcessingType;
-    this.includeProcessing = includeProcessing;
-    this.config = config;
     this.intermediateArtifacts = intermediateArtifacts;
     this.buildConfiguration = buildConfiguration;
     this.enableModules = enableModules;
@@ -84,7 +67,8 @@ public class ObjcCppSemantics implements CppSemantics {
         // system framework headers since they are not being scanned right now.
         // TODO(waltl): do better with include scanning.
         .addTransitiveMandatoryInputs(actionBuilder.getToolchain().getAllFilesMiddleman())
-        .setShouldScanIncludes(includeProcessingType == INCLUDE_SCANNING);
+        .setShouldScanIncludes(
+            configuration.getFragment(ObjcConfiguration.class).shouldScanIncludes());
   }
 
   @Override
@@ -102,13 +86,14 @@ public class ObjcCppSemantics implements CppSemantics {
   }
 
   @Override
-  public IncludeProcessing getIncludeProcessing() {
-    return includeProcessing;
+  public boolean allowIncludeScanning() {
+    return true;
   }
 
   @Override
   public boolean needsDotdInputPruning(BuildConfiguration configuration) {
-    return config.getDotdPruningPlan() == DotdPruningMode.USE;
+    return configuration.getFragment(ObjcConfiguration.class).getDotdPruningPlan()
+        == DotdPruningMode.USE;
   }
 
   @Override
@@ -117,10 +102,10 @@ public class ObjcCppSemantics implements CppSemantics {
 
   @Override
   public boolean needsIncludeValidation() {
-    // We disable include valication when modules are enabled, because Apple uses absolute paths in
+    // We disable include validation when modules are enabled, because Apple uses absolute paths in
     // its module maps, which include validation does not recognize.  Modules should only be used
     // rarely and in third party code anyways.
-    return (includeProcessingType == INCLUDE_SCANNING) && !enableModules;
+    return !enableModules;
   }
 
   /**

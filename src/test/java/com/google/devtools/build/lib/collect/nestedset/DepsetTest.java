@@ -338,12 +338,12 @@ public final class DepsetTest {
   @Test
   public void testDepsetIsNotIterable() throws Exception {
     ev.new Scenario()
-        .testIfErrorContains("not iterable", "list(depset(['a', 'b']))")
+        .testIfErrorContains("want 'iterable'", "list(depset(['a', 'b']))")
         .testIfErrorContains("not iterable", "max(depset([1, 2, 3]))")
         .testIfErrorContains(
             "unsupported binary operation: int in depset", "1 in depset([1, 2, 3])")
-        .testIfErrorContains("not iterable", "sorted(depset(['a', 'b']))")
-        .testIfErrorContains("not iterable", "tuple(depset(['a', 'b']))")
+        .testIfErrorContains("want 'iterable'", "sorted(depset(['a', 'b']))")
+        .testIfErrorContains("want 'iterable'", "tuple(depset(['a', 'b']))")
         .testIfErrorContains("not iterable", "[x for x in depset()]")
         .testIfErrorContains("not iterable", "len(depset(['a']))");
   }
@@ -461,8 +461,7 @@ public final class DepsetTest {
         .testEval("create_depset(3000)", "None") // succeeds
         .testIfErrorContains("depset depth 3501 exceeds limit (3500)", "create_depset(4000)");
 
-    Depset.setDepthLimit(100);
-    ev.new Scenario()
+    ev.new Scenario("--nested_set_depth_limit=100")
         .setUp(
             "def create_depset(depth):",
             "  x = depset([0])",
@@ -491,8 +490,8 @@ public final class DepsetTest {
 
     // abstract classes that implement StarlarkValue
     assertThat(ElementType.of(Sequence.class).toString()).isEqualTo("sequence");
-    assertThat(ElementType.of(StarlarkCallable.class).toString()).isEqualTo("function");
-    assertThat(ElementType.of(StarlarkIterable.class).toString()).isEqualTo("StarlarkIterable");
+    assertThat(ElementType.of(StarlarkCallable.class).toString()).isEqualTo("callable");
+    assertThat(ElementType.of(StarlarkIterable.class).toString()).isEqualTo("iterable");
 
     // superclasses of legal values that aren't values themselves
     assertThrows(IllegalArgumentException.class, () -> ElementType.of(Number.class));
@@ -503,7 +502,8 @@ public final class DepsetTest {
   @Test
   public void testSetComparison() throws Exception {
     ev.new Scenario()
-        .testIfExactError("Cannot compare depset with depset", "depset([1, 2]) < depset([3, 4])");
+        .testIfExactError(
+            "unsupported comparison: depset <=> depset", "depset([1, 2]) < depset([3, 4])");
   }
 
   @Test

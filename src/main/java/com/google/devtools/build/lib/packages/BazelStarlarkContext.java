@@ -19,6 +19,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.analysis.RuleDefinitionContext;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
+import java.util.HashMap;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Starlark;
@@ -47,18 +48,25 @@ public final class BazelStarlarkContext implements RuleDefinitionContext, Label.
   }
 
   private final Phase phase;
-  private final String toolsRepository;
+  // Only necessary for loading phase threads.
+  @Nullable private final String toolsRepository;
+  // Only necessary for loading phase threads to construct configuration_field.
   @Nullable private final ImmutableMap<String, Class<?>> fragmentNameToClass;
   private final ImmutableMap<RepositoryName, RepositoryName> repoMapping;
+  private final HashMap<String, Label> convertedLabelsInPackage;
   private final SymbolGenerator<?> symbolGenerator;
   @Nullable private final Label analysisRuleLabel;
 
   /**
    * @param phase the phase to which this Starlark thread belongs
-   * @param toolsRepository the name of the tools repository, such as "@bazel_tools"
+   * @param toolsRepository the name of the tools repository, such as "@bazel_tools" for loading
+   *     phase threads, null for other threads.
    * @param fragmentNameToClass a map from configuration fragment name to configuration fragment
-   *     class, such as "apple" to AppleConfiguration.class
+   *     class, such as "apple" to AppleConfiguration.class for loading phase threads, null for
+   *     other threads.
    * @param repoMapping a map from RepositoryName to RepositoryName to be used for external
+   * @param convertedLabelsInPackage a mutable map from String to Label, used during package loading
+   *     of a single package.
    * @param symbolGenerator a {@link SymbolGenerator} to be used when creating objects to be
    *     compared using reference equality.
    * @param analysisRuleLabel is the label of the rule for an analysis phase (rule or aspect
@@ -74,15 +82,17 @@ public final class BazelStarlarkContext implements RuleDefinitionContext, Label.
   // analysis threads?
   public BazelStarlarkContext(
       Phase phase,
-      String toolsRepository,
+      @Nullable String toolsRepository,
       @Nullable ImmutableMap<String, Class<?>> fragmentNameToClass,
       ImmutableMap<RepositoryName, RepositoryName> repoMapping,
+      HashMap<String, Label> convertedLabelsInPackage,
       SymbolGenerator<?> symbolGenerator,
       @Nullable Label analysisRuleLabel) {
     this.phase = phase;
     this.toolsRepository = toolsRepository;
     this.fragmentNameToClass = fragmentNameToClass;
     this.repoMapping = repoMapping;
+    this.convertedLabelsInPackage = convertedLabelsInPackage;
     this.symbolGenerator = Preconditions.checkNotNull(symbolGenerator);
     this.analysisRuleLabel = analysisRuleLabel;
   }
@@ -93,6 +103,7 @@ public final class BazelStarlarkContext implements RuleDefinitionContext, Label.
   }
 
   /** Returns the name of the tools repository, such as "@bazel_tools". */
+  @Nullable
   @Override
   public String getToolsRepository() {
     return toolsRepository;
@@ -111,6 +122,16 @@ public final class BazelStarlarkContext implements RuleDefinitionContext, Label.
   @Override
   public ImmutableMap<RepositoryName, RepositoryName> getRepoMapping() {
     return repoMapping;
+  }
+
+  /**
+   * Returns a String -> Label map of all the Strings that have already been converted to Labels
+   * during package loading of the current package.
+   *
+   * <p>This is used for a performance optimization during package loading, and unused otherwise.
+   */
+  public HashMap<String, Label> getConvertedLabelsInPackage() {
+    return convertedLabelsInPackage;
   }
 
   public SymbolGenerator<?> getSymbolGenerator() {

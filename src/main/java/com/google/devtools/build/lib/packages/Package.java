@@ -104,7 +104,7 @@ public class Package {
    */
   private final PackageIdentifier packageIdentifier;
 
-  private final boolean suggestNoSuchTargetCorrections;
+  private final boolean succinctTargetNotFoundErrors;
 
   /** The filename of this package's BUILD file. */
   private RootedPath filename;
@@ -142,6 +142,24 @@ public class Package {
    */
   private RuleVisibility defaultVisibility;
   private boolean defaultVisibilitySet;
+
+  /**
+   * How to enforce config_setting visibility settings.
+   *
+   * <p>This is a temporary setting in service of https://github.com/bazelbuild/bazel/issues/12669.
+   * After enough depot cleanup, config_setting will have the same visibility enforcement as all
+   * other rules.
+   */
+  public enum ConfigSettingVisibilityPolicy {
+    /** Don't enforce visibility for any config_setting. */
+    LEGACY_OFF,
+    /** Honor explicit visibility settings on config_setting, else  use //visibility:public. */
+    DEFAULT_PUBLIC,
+    /** Enforce config_setting visibility exactly the same as all other rules. */
+    DEFAULT_STANDARD
+  }
+
+  private ConfigSettingVisibilityPolicy configSettingVisibilityPolicy;
 
   /**
    * Default package-level 'testonly' value for rules that do not specify it.
@@ -251,10 +269,10 @@ public class Package {
    * <p>{@code name} <b>MUST</b> be a suffix of {@code filename.getParentDirectory())}.
    */
   private Package(
-      PackageIdentifier packageId, String workspaceName, boolean suggestNoSuchTargetCorrections) {
+      PackageIdentifier packageId, String workspaceName, boolean succinctTargetNotFoundErrors) {
     this.packageIdentifier = packageId;
     this.workspaceName = workspaceName;
-    this.suggestNoSuchTargetCorrections = suggestNoSuchTargetCorrections;
+    this.succinctTargetNotFoundErrors = succinctTargetNotFoundErrors;
   }
 
   /** Returns this packages' identifier. */
@@ -331,14 +349,6 @@ public class Package {
    */
   private void setDefaultDeprecation(String deprecation) {
     defaultDeprecation = deprecation;
-  }
-
-  /**
-   * Sets the default 'applicable_licenses" value for this package attribute when not explicitly
-   * specified by the rule.
-   */
-  private void setDefaultApplicableLicenses(Set<Label> licenses) {
-    defaultApplicableLicenses = licenses;
   }
 
   /**
@@ -436,6 +446,7 @@ public class Package {
     this.targets = ImmutableSortedKeyMap.copyOf(builder.targets);
     this.defaultVisibility = builder.defaultVisibility;
     this.defaultVisibilitySet = builder.defaultVisibilitySet;
+    this.configSettingVisibilityPolicy = builder.configSettingVisibilityPolicy;
     if (builder.defaultCopts == null) {
       this.defaultCopts = ImmutableList.of();
     } else {
@@ -447,6 +458,7 @@ public class Package {
     this.starlarkFileDependencies = builder.starlarkFileDependencies;
     this.defaultLicense = builder.defaultLicense;
     this.defaultDistributionSet = builder.defaultDistributionSet;
+    this.defaultApplicableLicenses = ImmutableSortedSet.copyOf(builder.defaultApplicableLicenses);
     this.features = ImmutableSortedSet.copyOf(builder.features);
     this.registeredExecutionPlatforms = ImmutableList.copyOf(builder.registeredExecutionPlatforms);
     this.registeredToolchains = ImmutableList.copyOf(builder.registeredToolchains);
@@ -644,19 +656,24 @@ public class Package {
       return target;
     }
 
-    String alternateTargetSuggestion =
-        suggestNoSuchTargetCorrections ? getAlternateTargetSuggestion(targetName) : "";
     Label label;
     try {
       label = Label.create(packageIdentifier, targetName);
     } catch (LabelSyntaxException e) {
       throw new IllegalArgumentException(targetName);
     }
-    String msg =
-        String.format(
-            "target '%s' not declared in package '%s'%s defined by %s",
-            targetName, getName(), alternateTargetSuggestion, filename.asPath().getPathString());
-    throw new NoSuchTargetException(label, msg);
+
+    if (succinctTargetNotFoundErrors) {
+      throw new NoSuchTargetException(
+          label, String.format("target '%s' not declared in package '%s'", targetName, getName()));
+    } else {
+      String alternateTargetSuggestion = getAlternateTargetSuggestion(targetName);
+      throw new NoSuchTargetException(
+          label,
+          String.format(
+              "target '%s' not declared in package '%s'%s defined by %s",
+              targetName, getName(), alternateTargetSuggestion, filename.asPath().getPathString()));
+    }
   }
 
   private String getAlternateTargetSuggestion(String targetName) {
@@ -698,6 +715,14 @@ public class Package {
    */
   public RuleVisibility getDefaultVisibility() {
     return defaultVisibility;
+  }
+
+  /**
+   * How to enforce visibility on <code>config_setting</code> See
+   * {@link ConfigSettingVisibilityPolicy} for details.
+   */
+  public ConfigSettingVisibilityPolicy getConfigSettingVisibilityPolicy() {
+    return configSettingVisibilityPolicy;
   }
 
   /**
@@ -861,11 +886,11 @@ public class Package {
     /** Defines configuration to control the runtime behavior of {@link Package}s. */
     public interface PackageSettings {
       /**
-       * Returns if {@link NoSuchTargetException}s thrown from {@link #getTarget} should attempt to
-       * suggest existing alternatives. The benefit is potentially improved error messaging, while
-       * the drawback is extra I/O and CPU work, which might not be desired in all environments.
+       * Returns whether or not extra detail should be added to {@link NoSuchTargetException}s
+       * thrown from {@link #getTarget}. Useful for toning down verbosity in situations where it can
+       * be less helpful.
        */
-      boolean suggestNoSuchTargetCorrections();
+      boolean succinctTargetNotFoundErrors();
 
       /**
        * Reports whether to record the set of Modules loaded by this package, which enables richer
@@ -881,8 +906,8 @@ public class Package {
       private DefaultPackageSettings() {}
 
       @Override
-      public boolean suggestNoSuchTargetCorrections() {
-        return true;
+      public boolean succinctTargetNotFoundErrors() {
+        return false;
       }
 
       @Override
@@ -920,6 +945,7 @@ public class Package {
     // serialized representation is deterministic.
     private final TreeMap<String, String> makeEnv = new TreeMap<>();
     private RuleVisibility defaultVisibility = ConstantRuleVisibility.PRIVATE;
+    private ConfigSettingVisibilityPolicy configSettingVisibilityPolicy;
     private boolean defaultVisibilitySet;
     private List<String> defaultCopts = null;
     private final List<String> features = new ArrayList<>();
@@ -973,16 +999,39 @@ public class Package {
 
     private final Interner<ImmutableList<?>> listInterner = new ThreadCompatibleInterner<>();
 
-    private final Map<Location, String> generatorNameByLocation = new HashMap<>();
+    private final HashMap<String, Label> convertedLabelsInPackage = new HashMap<>();
 
-    Map<Location, String> getGeneratorNameByLocation() {
-      return generatorNameByLocation;
+    private ImmutableMap<Location, String> generatorMap = ImmutableMap.of();
+
+    private final TestSuiteImplicitTestsAccumulator testSuiteImplicitTestsAccumulator =
+        new TestSuiteImplicitTestsAccumulator();
+
+    /** Returns the "generator_name" to use for a given call site location in a BUILD file. */
+    @Nullable
+    public String getGeneratorNameByLocation(Location loc) {
+      return generatorMap.get(loc);
     }
 
-    // Value of '$implicit_tests' attribute shared by all test_suite rules in the
-    // package that don't specify an explicit 'tests' attribute value.
-    // It contains the label of each non-manual test in the package, in label order.
-    final List<Label> testSuiteImplicitTests = new ArrayList<>();
+    /** Sets the package's map of "generator_name" values keyed by the location of the call site. */
+    public Builder setGeneratorMap(ImmutableMap<Location, String> map) {
+      this.generatorMap = map;
+      return this;
+    }
+
+    /**
+     * Returns the value to use for {@code test_suite}s' {@code $implicit_tests} attribute, as-is,
+     * when the {@code test_suite} doesn't specify an explicit, non-empty {@code tests} value. The
+     * returned list is mutated by the package-building process - it may be observed to be empty or
+     * incomplete before package loading is complete. When package loading is complete it will
+     * contain the label of each non-manual test matching the provided tags in the package, in label
+     * order.
+     *
+     * <p>This method <b>MUST</b> be called before the package is built - otherwise the requested
+     * implicit tests won't be accumulated.
+     */
+    List<Label> getTestSuiteImplicitTestsRef(List<String> tags) {
+      return testSuiteImplicitTestsAccumulator.getTestSuiteImplicitTestsRefForTags(tags);
+    }
 
     @ThreadCompatible
     private static class ThreadCompatibleInterner<T> implements Interner<T> {
@@ -1007,7 +1056,7 @@ public class Package {
         String workspaceName,
         boolean noImplicitFileExport,
         ImmutableMap<RepositoryName, RepositoryName> repositoryMapping) {
-      this.pkg = new Package(id, workspaceName, packageSettings.suggestNoSuchTargetCorrections());
+      this.pkg = new Package(id, workspaceName, packageSettings.succinctTargetNotFoundErrors());
       this.noImplicitFileExport = noImplicitFileExport;
       this.repositoryMapping = repositoryMapping;
       if (pkg.getName().startsWith("javatests/")) {
@@ -1072,8 +1121,12 @@ public class Package {
       return listInterner;
     }
 
+    HashMap<String, Label> getConvertedLabelsInPackage() {
+      return convertedLabelsInPackage;
+    }
+
     /** Sets the name of this package's BUILD file. */
-    Builder setFilename(RootedPath filename) {
+    public Builder setFilename(RootedPath filename) {
       this.filename = filename;
       try {
         buildFileLabel = createLabel(filename.getRootRelativePath().getBaseName());
@@ -1134,20 +1187,24 @@ public class Package {
     }
 
     /**
-     * Sets the default visibility for this package. Called at most once per
-     * package from PackageFactory.
+     * Sets the default visibility for this package. Called at most once per package from
+     * PackageFactory.
      */
-    Builder setDefaultVisibility(RuleVisibility visibility) {
+    public Builder setDefaultVisibility(RuleVisibility visibility) {
       this.defaultVisibility = visibility;
       this.defaultVisibilitySet = true;
       return this;
     }
 
-    /**
-     * Sets whether the default visibility is set in the BUILD file.
-     */
-    Builder setDefaultVisibilitySet(boolean defaultVisibilitySet) {
+    /** Sets whether the default visibility is set in the BUILD file. */
+    public Builder setDefaultVisibilitySet(boolean defaultVisibilitySet) {
       this.defaultVisibilitySet = defaultVisibilitySet;
+      return this;
+    }
+
+    /** Sets visibility enforcement policy for <code>config_setting</code>. */
+    public Builder setConfigSettingVisibilityPolicy(ConfigSettingVisibilityPolicy policy) {
+      this.configSettingVisibilityPolicy = policy;
       return this;
     }
 
@@ -1301,7 +1358,7 @@ public class Package {
           licenses, "package " + pkg.getName(), attrName, location, this::addEvent)) {
         setContainsErrors();
       }
-      pkg.setDefaultApplicableLicenses(ImmutableSet.copyOf(licenses));
+      this.defaultApplicableLicenses = ImmutableList.copyOf(licenses);
     }
 
     ImmutableList<Label> getDefaultApplicableLicenses() {
@@ -1644,7 +1701,10 @@ public class Package {
       // current instance here.
       buildFile = (InputFile) Preconditions.checkNotNull(targets.get(buildFileLabel.getName()));
 
-      List<Label> tests = new ArrayList<>();
+      // Clear tests before discovering them again in order to keep this method idempotent -
+      // otherwise we may double-count tests if we're called twice due to a skyframe restart, etc.
+      testSuiteImplicitTestsAccumulator.clearAccumulatedTests();
+
       Map<String, InputFile> newInputFiles = new HashMap<>();
       for (final Rule rule : getRules()) {
         if (discoverAssumedInputFiles) {
@@ -1667,21 +1727,11 @@ public class Package {
           }
         }
 
-        // "test_suite" rules have the idiosyncratic semantics of implicitly
-        // depending on all tests in the package, iff tests=[] and suites=[],
-        // which is about 20% of >1M test_suite instances in Google's corpus.
-        // Note, we implement this here when the Package is fully constructed,
-        // since clearly this information isn't available at Rule construction
-        // time, as forward references are permitted.
-        if (TargetUtils.isTestRule(rule) && !TargetUtils.hasManualTag(rule)) {
-          // Update the testSuiteImplicitTests list shared
-          // by all test_suite.$implicit_test attributes.
-          tests.add(rule.getLabel());
-        }
+        testSuiteImplicitTestsAccumulator.processRule(rule);
       }
 
-      Collections.sort(tests); // (for determinism)
-      this.testSuiteImplicitTests.addAll(tests);
+      // Make sure all accumulated values are sorted for determinism.
+      testSuiteImplicitTestsAccumulator.sortTests();
 
       for (InputFile file : newInputFiles.values()) {
         addInputFile(file);

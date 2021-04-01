@@ -16,7 +16,10 @@ package com.google.devtools.build.lib.query2.engine;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
+import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import java.util.Collection;
 import java.util.List;
@@ -158,6 +161,12 @@ public interface QueryEnvironment<T> {
     public abstract int getExpressionToFilterIndex();
   }
 
+  /** Functional interface for classes that need to look up a Target from a Label. */
+  @FunctionalInterface
+  interface TargetLookup {
+    Target getTarget(Label label) throws TargetNotFoundException, InterruptedException;
+  }
+
   /**
    * Exception type for the case where a target cannot be found. It's basically a wrapper for
    * whatever exception is internally thrown.
@@ -180,6 +189,23 @@ public interface QueryEnvironment<T> {
    * implementations of various operators.
    */
   interface CustomFunctionQueryEnvironment<T> extends QueryEnvironment<T> {
+    /**
+     * Returns a {@link QueryTaskFuture} representing the asynchronous evaluation of the given
+     * {@code expr} and passing of the results to the given {@code callback}.
+     *
+     * <p>This provides callers the option to decide whether or not to batch futures resulting from
+     * the given {@code expr}.
+     *
+     * @param expr The expression to evaluate
+     * @param callback The caller's callback to notify when results are available
+     * @param batch Whether or not to invoke the callback with a single batch of the result set
+     */
+    QueryTaskFuture<Void> eval(
+        QueryExpression expr,
+        QueryExpressionContext<T> context,
+        Callback<T> callback,
+        boolean batch);
+
     /**
      * Computes the transitive closure of dependencies at most maxDepth away from the given targets,
      * and calls the given callback with the results.
@@ -620,7 +646,8 @@ public interface QueryEnvironment<T> {
      * Returns the set of package specifications the given target is visible from, represented as
      * {@link QueryVisibility}s.
      */
-    Set<QueryVisibility<T>> getVisibility(T from) throws QueryException, InterruptedException;
+    ImmutableSet<QueryVisibility<T>> getVisibility(QueryExpression caller, T from)
+        throws QueryException, InterruptedException;
   }
 
   /** List of the default query functions. */

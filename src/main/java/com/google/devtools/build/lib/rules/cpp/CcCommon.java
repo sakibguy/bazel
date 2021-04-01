@@ -14,16 +14,19 @@
 package com.google.devtools.build.lib.rules.cpp;
 
 import static com.google.devtools.build.lib.packages.BuildType.LABEL;
+import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
+import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.AliasProvider;
 import com.google.devtools.build.lib.analysis.AnalysisEnvironment;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.MakeVariableSupplier;
@@ -32,7 +35,6 @@ import com.google.devtools.build.lib.analysis.RuleContext;
 import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.analysis.config.CompilationMode;
-import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
 import com.google.devtools.build.lib.analysis.starlark.StarlarkRuleContext;
 import com.google.devtools.build.lib.analysis.stringtemplate.ExpansionException;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector;
@@ -158,7 +160,7 @@ public final class CcCommon {
 
   private final FdoContext fdoContext;
 
-  public CcCommon(RuleContext ruleContext) {
+  public CcCommon(RuleContext ruleContext) throws RuleErrorException {
     this(
         ruleContext,
         Preconditions.checkNotNull(
@@ -525,7 +527,20 @@ public final class CcCommon {
 
   private List<String> getDefinesFromAttribute(String attr) {
     List<String> defines = new ArrayList<>();
-    for (String define : ruleContext.getExpander().list(attr)) {
+
+    // collect labels that can be subsituted in defines
+    ImmutableMap.Builder<Label, ImmutableCollection<Artifact>> builder = ImmutableMap.builder();
+
+    if (ruleContext.attributes().has("deps", LABEL_LIST)) {
+      for (TransitiveInfoCollection current : ruleContext.getPrerequisites("deps")) {
+        builder.put(
+            AliasProvider.getDependencyLabel(current),
+            current.getProvider(FileProvider.class).getFilesToBuild().toList());
+      }
+    }
+
+    // tokenize defines and substitute make variables
+    for (String define : ruleContext.getExpander().withExecLocations(builder.build()).list(attr)) {
       List<String> tokens = new ArrayList<>();
       try {
         ShellUtils.tokenize(tokens, define);
@@ -584,7 +599,7 @@ public final class CcCommon {
     List<PathFragment> result = new ArrayList<>();
     PackageIdentifier packageIdentifier = ruleContext.getLabel().getPackageIdentifier();
     PathFragment packageExecPath = packageIdentifier.getExecPath(siblingRepositoryLayout);
-    PathFragment packageSourceRoot = packageIdentifier.getPackagePath();
+    PathFragment packageSourceRoot = packageIdentifier.getPackagePath(siblingRepositoryLayout);
     for (String includesAttr : ruleContext.getExpander().list("includes")) {
       if (includesAttr.startsWith("/")) {
         ruleContext.attributeWarning("includes",
@@ -717,13 +732,15 @@ public final class CcCommon {
     return getInstrumentedFilesProvider(
         files,
         withBaselineCoverage,
-        /* virtualToOriginalHeaders= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER));
+        /* virtualToOriginalHeaders= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
+        /* additionalMetadata= */ null);
   }
 
   public InstrumentedFilesInfo getInstrumentedFilesProvider(
       Iterable<Artifact> files,
       boolean withBaselineCoverage,
-      NestedSet<Pair<String, String>> virtualToOriginalHeaders)
+      NestedSet<Pair<String, String>> virtualToOriginalHeaders,
+      @Nullable Iterable<Artifact> additionalMetadata)
       throws RuleErrorException {
     return InstrumentedFilesCollector.collect(
         ruleContext,
@@ -733,7 +750,8 @@ public final class CcCommon {
         CppHelper.getGcovFilesIfNeeded(ruleContext, ccToolchain),
         CppHelper.getCoverageEnvironmentIfNeeded(ruleContext, cppConfiguration, ccToolchain),
         withBaselineCoverage,
-        virtualToOriginalHeaders);
+        virtualToOriginalHeaders,
+        additionalMetadata);
   }
 
   public String getPurpose(CppSemantics semantics) {
@@ -807,11 +825,13 @@ public final class CcCommon {
     ImmutableSet.Builder<String> unsupportedFeaturesBuilder = ImmutableSet.builder();
     unsupportedFeaturesBuilder.addAll(unsupportedFeatures);
     if (!toolchain.supportsHeaderParsing()) {
-      // TODO(bazel-team): Remove once supports_header_parsing has been removed from the
+      // TODO(b/159096411): Remove once supports_header_parsing has been removed from the
       // cc_toolchain rule.
       unsupportedFeaturesBuilder.add(CppRuleClasses.PARSE_HEADERS);
     }
-    if (toolchain.getCcInfo().getCcCompilationContext().getCppModuleMap() == null) {
+
+    if (!requestedFeatures.contains(CppRuleClasses.LANG_OBJC)
+        && toolchain.getCcInfo().getCcCompilationContext().getCppModuleMap() == null) {
       unsupportedFeaturesBuilder.add(CppRuleClasses.MODULE_MAPS);
     }
 
@@ -884,6 +904,12 @@ public final class CcCommon {
             && !allUnsupportedFeatures.contains(CppRuleClasses.THIN_LTO)) {
           allFeatures.add(CppRuleClasses.ENABLE_FDO_THINLTO);
         }
+
+        // Support implicit enabling of split functions for FDO unless it has been disabled.
+        if (toolchain.isLLVMCompiler()
+            && !allUnsupportedFeatures.contains(CppRuleClasses.SPLIT_FUNCTIONS)) {
+          allFeatures.add(CppRuleClasses.ENABLE_FDO_SPLIT_FUNCTIONS);
+        }
       }
       if (branchFdoProvider.isLlvmCSFdo()) {
         allFeatures.add(CppRuleClasses.CS_FDO_OPTIMIZE);
@@ -911,7 +937,9 @@ public final class CcCommon {
       allRequestedFeaturesBuilder.add(CppRuleClasses.FDO_PREFETCH_HINTS);
     }
 
-    if (cppConfiguration.getPropellerOptimizeLabel() != null) {
+    if (cppConfiguration.getPropellerOptimizeLabel() != null
+        || cppConfiguration.getPropellerOptimizeAbsoluteCCProfile() != null
+        || cppConfiguration.getPropellerOptimizeAbsoluteLdProfile() != null) {
       allRequestedFeaturesBuilder.add(CppRuleClasses.PROPELLER_OPTIMIZE);
     }
 
@@ -949,8 +977,7 @@ public final class CcCommon {
    */
   public static String computeCcFlags(RuleContext ruleContext, TransitiveInfoCollection toolchain)
       throws RuleErrorException {
-    CcToolchainProvider toolchainProvider =
-        (CcToolchainProvider) toolchain.get(ToolchainInfo.PROVIDER);
+    CcToolchainProvider toolchainProvider = toolchain.get(CcToolchainProvider.PROVIDER);
 
     // Determine the original value of CC_FLAGS.
     String originalCcFlags = toolchainProvider.getLegacyCcFlagsMakeVariable();
@@ -1067,16 +1094,6 @@ public final class CcCommon {
     return outputGroupsBuilder.build();
   }
 
-  public static void checkRuleLoadedThroughMacro(RuleContext ruleContext) {
-    if (!ruleContext.getFragment(CppConfiguration.class).loadCcRulesFromBzl()) {
-      return;
-    }
-
-    if (!hasValidTag(ruleContext) || !ruleContext.getRule().wasCreatedByMacro()) {
-      registerMigrationRuleError(ruleContext);
-    }
-  }
-
   public static boolean isOldStarlarkApiWhiteListed(
       StarlarkRuleContext starlarkRuleContext, List<String> whitelistedPackages) {
     RuleContext context = starlarkRuleContext.getRuleContext();
@@ -1089,21 +1106,5 @@ public final class CcCommon {
           .anyMatch(path -> label.getPackageFragment().toString().startsWith(path));
     }
     return false;
-  }
-
-  private static boolean hasValidTag(RuleContext ruleContext) {
-    return ruleContext
-        .attributes()
-        .get("tags", Type.STRING_LIST)
-        .contains("__CC_RULES_MIGRATION_DO_NOT_USE_WILL_BREAK__");
-  }
-
-  private static void registerMigrationRuleError(RuleContext ruleContext) {
-    ruleContext.ruleError(
-        "The native C++/Objc rules are deprecated. Please load "
-            + ruleContext.getRule().getRuleClass()
-            + " from the rules_cc repository. See http://github.com/bazelbuild/rules_cc and "
-            + "https://github.com/bazelbuild/bazel/issues/7643. You can temporarily bypass this "
-            + "error by setting --incompatible_load_cc_rules_from_bzl=false.");
   }
 }

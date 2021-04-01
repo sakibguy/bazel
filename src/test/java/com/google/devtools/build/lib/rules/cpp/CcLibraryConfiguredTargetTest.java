@@ -32,6 +32,7 @@ import com.google.devtools.build.lib.analysis.OutputGroupInfo;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesInfo;
 import com.google.devtools.build.lib.analysis.util.AnalysisMock;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
+import com.google.devtools.build.lib.analysis.util.DummyTestFragment;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
@@ -61,6 +62,7 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
   protected ConfiguredRuleClassProvider createRuleClassProvider() {
     ConfiguredRuleClassProvider.Builder builder = new ConfiguredRuleClassProvider.Builder();
     TestRuleClassProvider.addStandardRules(builder);
+    builder.addConfigurationFragment(DummyTestFragment.class);
     return builder.addRuleDefinition(new TestRuleClassProvider.MakeVariableTesterRule()).build();
   }
 
@@ -147,8 +149,7 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
     ConfiguredTarget l = scratchConfiguredTarget("a", "l",
         "cc_library(name='l', srcs=['l.cc'], defines=['V=$(FOO)'], toolchains=[':v'])",
         "make_variable_tester(name='v', variables={'FOO': 'BAR'})");
-    assertThat(l.get(CcInfo.PROVIDER).getCcCompilationContext().getDefines().toList())
-        .contains("V=BAR");
+    assertThat(l.get(CcInfo.PROVIDER).getCcCompilationContext().getDefines()).contains("V=BAR");
   }
 
   @Test
@@ -223,7 +224,10 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
         .containsExactly(archive, implSharedObject, implInterfaceSharedObject);
     assertThat(
             LibraryToLink.getDynamicLibrariesForLinking(
-                hello.getProvider(CcNativeLibraryProvider.class).getTransitiveCcNativeLibraries()))
+                hello
+                    .get(CcInfo.PROVIDER)
+                    .getCcNativeLibraryInfo()
+                    .getTransitiveCcNativeLibraries()))
         .containsExactly(implInterfaceSharedObjectLink);
     assertThat(
             hello
@@ -266,7 +270,10 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
         .containsExactly(archive, sharedObject, implSharedObject);
     assertThat(
             LibraryToLink.getDynamicLibrariesForLinking(
-                hello.getProvider(CcNativeLibraryProvider.class).getTransitiveCcNativeLibraries()))
+                hello
+                    .get(CcInfo.PROVIDER)
+                    .getCcNativeLibraryInfo()
+                    .getTransitiveCcNativeLibraries()))
         .containsExactly(sharedObjectLink);
     assertThat(
             hello
@@ -443,6 +450,9 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
 
   @Test
   public void testWindowsFileNamePatternsCanBeSpecifiedInToolchain() throws Exception {
+    if (!AnalysisMock.get().isThisBazel()) {
+      return;
+    }
     AnalysisMock.get()
         .ccSupport()
         .setupCcToolchainConfig(
@@ -485,7 +495,7 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
 
     assertThat(
             artifactsToStrings(getOutputGroup(hello, CcLibrary.DYNAMIC_LIBRARY_OUTPUT_GROUP_NAME)))
-        .containsExactly("bin hello/hello.dll", "bin hello/hello.if.lib");
+        .containsExactly("bin hello/hello_9a9972c34e.dll", "bin hello/hello.if.lib");
   }
 
   @Test
@@ -1664,12 +1674,12 @@ public class CcLibraryConfiguredTargetTest extends BuildViewTestCase {
         "def _impl(settings, attr):",
         "    _ignore = (settings, attr)",
         "    return [",
-        "        {'//command_line_option:test_arg': ['foo']},",
+        "        {'//command_line_option:foo': 'foo'},",
         "    ]",
         "cpu_transition = transition(",
         "    implementation = _impl,",
         "    inputs = [],",
-        "    outputs = ['//command_line_option:test_arg'],",
+        "    outputs = ['//command_line_option:foo'],",
         ")",
         "def _transitioned_file_impl(ctx):",
         "    return DefaultInfo(files = depset([ctx.file.src]))",

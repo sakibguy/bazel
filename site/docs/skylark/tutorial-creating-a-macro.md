@@ -1,9 +1,10 @@
 ---
 layout: documentation
 title: Creating a macro
+category: extending
 ---
 
-# Creating a macro
+# Creating a Macro
 
 Let's suppose you need to run a tool as part of your build. For example, you
 may want to generate or preprocess a source file, or compress a binary. In this

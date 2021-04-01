@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-load("//tools/build_defs/pkg:pkg.bzl", "pkg_deb", "pkg_tar")
+load("//tools/build_defs/pkg:pkg.bzl", "pkg_tar")
 load("//tools/config:common_settings.bzl", "bool_flag")
 load("//tools/python:private/defs.bzl", "py_binary", "py_library", "py_test")
-load("//tools/python:private/version.bzl", "PY_BINARY_VERSION")
 
 licenses(["notice"])  # Apache 2.0
 
@@ -23,7 +22,6 @@ exports_files(
     visibility = ["//site:__pkg__"],
 )
 
-# Used by pkg_deb
 py_library(
     name = "archive",
     srcs = ["archive.py"],
@@ -43,7 +41,7 @@ py_test(
         "testenv.py",
     ],
     data = [":archive_testdata"],
-    python_version = PY_BINARY_VERSION,
+    python_version = "PY3",
     srcs_version = "PY2AND3",
     tags = [
         # archive.py requires xzcat, which is not available by default on Mac
@@ -64,66 +62,12 @@ py_test(
 py_binary(
     name = "build_tar",
     srcs = ["build_tar.py"],
-    python_version = PY_BINARY_VERSION,
+    python_version = "PY3",
     srcs_version = "PY2AND3",
     visibility = ["//visibility:public"],
     deps = [
         ":archive",
         "//third_party/py/abseil",
-    ],
-)
-
-py_binary(
-    name = "make_deb",
-    srcs = ["make_deb.py"],
-    deprecation = "The internal version of make_deb is deprecated. Please " +
-                  "use the replacement for pkg_deb from " +
-                  "https://github.com/bazelbuild/rules_pkg/blob/master/pkg.",
-    python_version = PY_BINARY_VERSION,
-    srcs_version = "PY2AND3",
-    visibility = ["//visibility:public"],
-    deps = [
-        ":archive",
-        "//third_party/py/abseil",
-    ],
-)
-
-# Used by pkg_rpm in rpm.bzl.
-py_binary(
-    name = "make_rpm",
-    srcs = ["make_rpm.py"],
-    deprecation = "The internal version of make_rpm is deprecated. Please " +
-                  "use the replacement for pkg_rpm from " +
-                  "https://github.com/bazelbuild/rules_pkg/blob/master/pkg.",
-    python_version = PY_BINARY_VERSION,
-    srcs_version = "PY2AND3",
-    visibility = ["//visibility:public"],
-    deps = [
-        ":make_rpm_lib",
-    ],
-)
-
-py_library(
-    name = "make_rpm_lib",
-    srcs = ["make_rpm.py"],
-    srcs_version = "PY2AND3",
-    visibility = ["//visibility:public"],
-    deps = [
-        "//third_party/py/abseil",
-    ],
-)
-
-py_test(
-    name = "make_rpm_test",
-    srcs = ["make_rpm_test.py"],
-    python_version = PY_BINARY_VERSION,
-    srcs_version = "PY2AND3",
-    # rpmbuild is not available in windows
-    tags = [
-        "no_windows",
-    ],
-    deps = [
-        ":make_rpm_lib",
     ],
 )
 
@@ -136,29 +80,6 @@ genrule(
         "usr/titi",
     ],
     cmd = "for i in $(OUTS); do echo 1 >$$i; done",
-)
-
-pkg_deb(
-    name = "test-deb",
-    built_using = "some_test_data (0.1.2)",
-    conffiles = [
-        "/etc/nsswitch.conf",
-        "/etc/other",
-    ],
-    config = ":testdata/config",
-    data = ":test-tar-gz.tar.gz",
-    depends = [
-        "dep1",
-        "dep2",
-    ],
-    description = "toto ®, Й, ק ,م, ๗, あ, 叶, 葉, 말, ü and é",
-    distribution = "trusty",
-    maintainer = "soméone@somewhere.com",
-    make_deb = ":make_deb",
-    package = "titi",
-    templates = ":testdata/templates",
-    urgency = "low",
-    version = "test",
 )
 
 [pkg_tar(
@@ -277,7 +198,6 @@ sh_test(
     ],
     data = [
         "testenv.sh",
-        ":test-deb.deb",
         ":test-tar-.tar",
         ":test-tar-bz2.tar.bz2",
         ":test-tar-empty_dirs.tar",

@@ -14,7 +14,6 @@
 package com.google.devtools.build.lib.skyframe.actiongraph;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionAnalysisMetadata;
@@ -28,6 +27,7 @@ import com.google.devtools.build.lib.analysis.AnalysisProtos;
 import com.google.devtools.build.lib.analysis.AnalysisProtos.ActionGraphContainer;
 import com.google.devtools.build.lib.analysis.AspectValue;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.ConfiguredTargetValue;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget;
@@ -36,7 +36,6 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.packages.AspectDescriptor;
 import com.google.devtools.build.lib.query2.aquery.AqueryActionFilter;
 import com.google.devtools.build.lib.query2.aquery.AqueryUtils;
-import com.google.devtools.build.lib.skyframe.ConfiguredTargetValue;
 import com.google.devtools.build.lib.util.Pair;
 import java.util.HashMap;
 import java.util.List;
@@ -65,19 +64,6 @@ public class ActionGraphDump {
   private final boolean includeParamFiles;
 
   private Map<String, Iterable<String>> paramFileNameToContentMap;
-
-  public ActionGraphDump(
-      boolean includeActionCmdLine,
-      boolean includeArtifacts,
-      AqueryActionFilter actionFilters,
-      boolean includeParamFiles) {
-    this(
-        /* actionGraphTargets= */ ImmutableList.of("..."),
-        includeActionCmdLine,
-        includeArtifacts,
-        actionFilters,
-        includeParamFiles);
-  }
 
   public ActionGraphDump(
       List<String> actionGraphTargets, boolean includeActionCmdLine, boolean includeArtifacts) {
@@ -122,7 +108,7 @@ public class ActionGraphDump {
   }
 
   private void dumpSingleAction(ConfiguredTarget configuredTarget, ActionAnalysisMetadata action)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
 
     // Store the content of param files.
     if (includeParamFiles && (action instanceof ParameterFileWriteAction)) {
@@ -238,7 +224,7 @@ public class ActionGraphDump {
   }
 
   public void dumpAspect(AspectValue aspectValue, ConfiguredTargetValue configuredTargetValue)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     ConfiguredTarget configuredTarget = configuredTargetValue.getConfiguredTarget();
     if (!includeInActionGraph(configuredTarget.getLabel().toString())) {
       return;
@@ -249,7 +235,7 @@ public class ActionGraphDump {
   }
 
   public void dumpConfiguredTarget(ConfiguredTargetValue configuredTargetValue)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     ConfiguredTarget configuredTarget = configuredTargetValue.getConfiguredTarget();
     if (!includeInActionGraph(configuredTarget.getLabel().toString())) {
       return;

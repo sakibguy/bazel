@@ -23,11 +23,14 @@ import com.google.common.base.Joiner;
 import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
+import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Streams;
 import com.google.devtools.build.lib.actions.ArtifactResolver.ArtifactResolverSupplier;
+import com.google.devtools.build.lib.actions.ArtifactRoot.RootType;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
@@ -198,8 +201,15 @@ public abstract class Artifact
     return ((DerivedArtifact) artifact).getGeneratingActionKey();
   }
 
-  public static Iterable<SkyKey> keys(Iterable<Artifact> artifacts) {
-    return Iterables.transform(artifacts, Artifact::key);
+  public static Collection<SkyKey> keys(Collection<Artifact> artifacts) {
+    return artifacts instanceof List
+        ? keys((List<Artifact>) artifacts)
+        // Use Collections2 instead of Iterables#transform to ensure O(1) size().
+        : Collections2.transform(artifacts, Artifact::key);
+  }
+
+  public static List<SkyKey> keys(List<Artifact> artifacts) {
+    return Lists.transform(artifacts, Artifact::key);
   }
 
   @Override
@@ -648,14 +658,9 @@ public abstract class Artifact
    * that this is available on every Artifact type, including source artifacts. As a matter of fact,
    * one of its most common use cases is to construct a derived artifact's output path out of a
    * sibling source artifact's by replacing the basename in its output-dir-relative path.
-   *
-   * <p>This is just a wrapper over {@link Artifact#getPathForLocationExpansion} at the moment.
-   * However, since it will be kept in sync with the output directory layout, which is planned for
-   * an overhaul, it must be preferred over {@link Artifact#getPathForLocationExpansion} whenever
-   * possible.
    */
-  public final PathFragment getOutputDirRelativePath(boolean siblingRepositoryLayout) {
-    return getPathForLocationExpansion();
+  public PathFragment getOutputDirRelativePath(boolean siblingRepositoryLayout) {
+    return getRootRelativePath();
   }
 
   /**
@@ -663,10 +668,12 @@ public abstract class Artifact
    * path always starts with a corresponding package name, if exists.
    */
   public PathFragment getRepositoryRelativePath() {
-    PathFragment fullPath = getPathForLocationExpansion();
-    return fullPath.startsWith(LabelConstants.EXTERNAL_PATH_PREFIX)
-        ? fullPath.subFragment(2)
-        : fullPath;
+    PathFragment relativePath = getRootRelativePath();
+    // External artifacts under legacy roots are still prefixed with "external/<repo name>".
+    if (root.isLegacy() && relativePath.startsWith(LabelConstants.EXTERNAL_PATH_PREFIX)) {
+      relativePath = relativePath.subFragment(2);
+    }
+    return relativePath;
   }
 
   /** Returns this.getExecPath().getPathString(). */
@@ -792,13 +799,30 @@ public abstract class Artifact
    * runfiles tree. For local targets, it returns the rootRelativePath.
    */
   public final PathFragment getRunfilesPath() {
-    PathFragment relativePath = getOutputDirRelativePath(false);
-    // We can't use root.isExternalSource() here since it needs to handle derived artifacts too.
-    if (relativePath.startsWith(LabelConstants.EXTERNAL_PATH_PREFIX)) {
-      // Turn external/repo/foo into ../repo/foo.
-      relativePath = relativePath.relativeTo(LabelConstants.EXTERNAL_PATH_PREFIX);
-      relativePath = PathFragment.create("..").getRelative(relativePath);
+    PathFragment relativePath = getRootRelativePath();
+    // Runfile paths for external artifacts should be prefixed with "../<repo name>".
+    if (root.isLegacy()) {
+      // Root-relative paths of external artifacts under legacy roots are already prefixed with
+      // "external/<repo name>". Just replace "external" with "..".
+      if (relativePath.startsWith(LabelConstants.EXTERNAL_PATH_PREFIX)) {
+        relativePath = relativePath.relativeTo(LabelConstants.EXTERNAL_PATH_PREFIX);
+        relativePath = LabelConstants.EXTERNAL_RUNFILES_PATH_PREFIX.getRelative(relativePath);
+      }
+    } else {
+      if (root.isExternal()) {
+        // Both external source artifacts and external derived artifacts have their repo name as
+        // their 2nd level directory name in their exec paths.
+        // i.e. external/<repo name>/... and bazel-out/<repo name>/...
+        // This is a pure coincidence, and the below line needs to be updated if any of the
+        // directory structures change.
+        String repoName = getExecPath().getSegment(1);
+        relativePath =
+            LabelConstants.EXTERNAL_RUNFILES_PATH_PREFIX
+                .getRelative(repoName)
+                .getRelative(relativePath);
+      }
     }
+    // We can't use root.isExternalSource() here since it needs to handle derived artifacts too.
     return relativePath;
   }
 
@@ -894,7 +918,7 @@ public abstract class Artifact
 
     @Override
     public PathFragment getRootRelativePath() {
-      return root.isExternalSourceRoot() ? getExecPath().subFragment(1) : getExecPath();
+      return root.isExternal() ? getExecPath().subFragment(2) : getExecPath();
     }
 
     @Override
@@ -903,8 +927,13 @@ public abstract class Artifact
     }
 
     @Override
+    public PathFragment getOutputDirRelativePath(boolean siblingRepositoryLayout) {
+      return siblingRepositoryLayout ? getRepositoryRelativePath() : getExecPath();
+    }
+
+    @Override
     public PathFragment getRepositoryRelativePath() {
-      return root.isExternalSourceRoot() ? getExecPath().subFragment(2) : getExecPath();
+      return getRootRelativePath();
     }
 
     @Override
@@ -1114,15 +1143,38 @@ public abstract class Artifact
         ArtifactRoot treeArtifactRoot,
         PathFragment derivedPathPrefix,
         PathFragment customDerivedTreeRoot) {
-      Path execRoot = getExecRoot(treeArtifactRoot);
+      return ArtifactRoot.asDerivedRoot(
+          getExecRoot(treeArtifactRoot),
+          // e.g. bazel-out/{customDerivedTreeRoot}/k8-fastbuild/bin
+          RootType.Output,
+          getExecPathWithinCustomDerivedRoot(
+              derivedPathPrefix, customDerivedTreeRoot, treeArtifactRoot.getExecPath()));
+    }
 
-      // bazel-out/k8-fastbuild/bin -> bazel-out/{customDerivedTreeRoot}/k8-fastbuild/bin
-      PathFragment rootExecPath =
-          derivedPathPrefix
-              .getRelative(customDerivedTreeRoot)
-              .getRelative(treeArtifactRoot.getExecPath().relativeTo(derivedPathPrefix));
+    /**
+     * Returns an exec path within the archived artifacts directory tree corresponding to the
+     * provided one.
+     *
+     * <p>Example: {@code bazel-out/k8-fastbuild/bin ->
+     * bazel-out/{customDerivedTreeRoot}/k8-fastbuild/bin}.
+     */
+    public static PathFragment getExecPathWithinArchivedArtifactsTree(
+        PathFragment derivedPathPrefix, PathFragment execPath) {
+      return getExecPathWithinCustomDerivedRoot(
+          derivedPathPrefix, ARCHIVED_ARTIFACTS_DERIVED_TREE_ROOT, execPath);
+    }
 
-      return ArtifactRoot.asDerivedRoot(execRoot, rootExecPath);
+    /**
+     * Translates provided output {@code execPath} to one under provided derived tree root.
+     *
+     * <p>Example: {@code bazel-out/k8-fastbuild/bin ->
+     * bazel-out/{customDerivedTreeRoot}/k8-fastbuild/bin}.
+     */
+    private static PathFragment getExecPathWithinCustomDerivedRoot(
+        PathFragment derivedPathPrefix, PathFragment customDerivedTreeRoot, PathFragment execPath) {
+      return derivedPathPrefix
+          .getRelative(customDerivedTreeRoot)
+          .getRelative(execPath.relativeTo(derivedPathPrefix));
     }
 
     private static Path getExecRoot(ArtifactRoot artifactRoot) {
@@ -1333,8 +1385,8 @@ public abstract class Artifact
   public static final Function<Artifact, String> ROOT_RELATIVE_PATH_STRING =
       artifact -> artifact.getRootRelativePath().getPathString();
 
-  public static final Function<Artifact, String> OUTPUT_DIR_RELATIVE_PATH_STRING =
-      artifact -> artifact.getOutputDirRelativePath(false).getPathString();
+  public static final Function<Artifact, String> RUNFILES_PATH_STRING =
+      artifact -> artifact.getRunfilesPath().getPathString();
 
   /**
    * Converts a collection of artifacts into execution-time path strings, and

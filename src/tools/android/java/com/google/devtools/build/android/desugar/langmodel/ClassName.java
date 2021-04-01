@@ -87,10 +87,7 @@ public abstract class ClassName implements TypeMappable<ClassName>, Comparable<C
   private static final ImmutableBiMap<String, String> SHADOWED_TO_MIRRORED_TYPE_PREFIX_MAPPINGS =
       ImmutableBiMap.<String, String>builder()
           .put("java/time/", "j$/time/")
-          .put("java/lang/Double8", "j$/lang/Double8")
-          .put("java/lang/Integer8", "j$/lang/Integer8")
-          .put("java/lang/Long8", "j$/lang/Long8")
-          .put("java/lang/Math8", "j$/lang/Math8")
+          .put("java/lang/Desugar", "j$/lang/Desugar")
           .put("java/io/Desugar", "j$/io/Desugar")
           .put("java/io/UncheckedIOException", "j$/io/UncheckedIOException")
           .put("java/util/stream/", "j$/util/stream/")
@@ -110,6 +107,8 @@ public abstract class ClassName implements TypeMappable<ClassName>, Comparable<C
               "java/util/concurrent/atomic/DesugarAtomic",
               "j$/util/concurrent/atomic/DesugarAtomic")
           .put("javadesugar/testing/", "jd$/testing/")
+          .put("sun/misc/Desugar", "j$/sun/misc/Desugar")
+          .put("jdk/internal/util/", "j$/jdk/internal/util/")
           .build();
 
   public static final TypeMapper SHADOWED_TO_MIRRORED_TYPE_MAPPER =

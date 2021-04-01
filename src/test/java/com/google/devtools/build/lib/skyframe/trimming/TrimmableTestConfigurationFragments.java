@@ -20,7 +20,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.MutableActionGraph.ActionConflictException;
-import com.google.devtools.build.lib.analysis.BaseRuleClasses.BaseRule;
+import com.google.devtools.build.lib.analysis.BaseRuleClasses;
 import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileProvider;
@@ -35,10 +35,10 @@ import com.google.devtools.build.lib.analysis.RunfilesProvider;
 import com.google.devtools.build.lib.analysis.actions.FileWriteAction;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.BuildOptionsView;
-import com.google.devtools.build.lib.analysis.config.ConfigurationFragmentFactory;
 import com.google.devtools.build.lib.analysis.config.CoreOptions;
 import com.google.devtools.build.lib.analysis.config.Fragment;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
+import com.google.devtools.build.lib.analysis.config.RequiresOptions;
 import com.google.devtools.build.lib.analysis.config.transitions.PatchTransition;
 import com.google.devtools.build.lib.analysis.config.transitions.TransitionFactory;
 import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
@@ -56,6 +56,7 @@ import com.google.devtools.build.lib.packages.BuildType;
 import com.google.devtools.build.lib.packages.ImplicitOutputsFunction;
 import com.google.devtools.build.lib.packages.NonconfigurableAttributeMapper;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.packages.RuleClass.ToolchainResolutionMode;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.ToolchainType.ToolchainTypeRule;
 import com.google.devtools.build.lib.rules.core.CoreRules;
@@ -70,7 +71,6 @@ import com.google.devtools.common.options.OptionEffectTag;
 import com.google.devtools.common.options.OptionsParser;
 import java.io.IOException;
 import java.util.List;
-import java.util.function.Function;
 import javax.annotation.Nullable;
 import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.eval.EvalException;
@@ -188,12 +188,12 @@ public final class TrimmableTestConfigurationFragments {
         .setPrelude("//:prelude.bzl")
         // must be part of BuildOptions for various reasons e.g. dynamic configs
         .addConfigurationOptions(CoreOptions.class)
-        .addConfigurationFragment(new TestConfiguration.Loader())
+        .addConfigurationFragment(TestConfiguration.class)
         // needed for the default workspace
         .addRuleDefinition(new WorkspaceBaseRule())
         .addRuleDefinition(new BindRule())
         // needed for our native rules
-        .addRuleDefinition(new BaseRule())
+        .addRuleDefinition(new BaseRuleClasses.NativeBuildRule())
         // needed to define toolchains
         .addRuleDefinition(new ToolchainTypeRule())
         // needs to be set to something
@@ -203,175 +203,167 @@ public final class TrimmableTestConfigurationFragments {
 
     MockRule transitionRule =
         () ->
-            MockRule.ancestor(BaseRule.class)
+            MockRule.ancestor(BaseRuleClasses.NativeBuildRule.class)
                 .factory(DepsCollectingFactory.class)
                 .define(
                     "with_configuration",
-                    (ruleBuilder, env) -> {
-                      ruleBuilder
-                          .requiresConfigurationFragments(
-                              AConfig.class,
-                              BConfig.class,
-                              CConfig.class,
-                              DConfig.class,
-                              EConfig.class,
-                              PlatformConfiguration.class)
-                          .cfg(new TestFragmentTransitionFactory())
-                          .add(
-                              attr("deps", BuildType.LABEL_LIST)
-                                  .allowedFileTypes(FileTypeSet.ANY_FILE))
-                          .add(
-                              attr("alpha", Type.STRING)
-                                  .value((String) null)
-                                  .nonconfigurable("used in transition"))
-                          .add(
-                              attr("bravo", Type.STRING)
-                                  .value((String) null)
-                                  .nonconfigurable("used in transition"))
-                          .add(
-                              attr("charlie", Type.STRING)
-                                  .value((String) null)
-                                  .nonconfigurable("used in transition"))
-                          .add(
-                              attr("delta", Type.STRING)
-                                  .value((String) null)
-                                  .nonconfigurable("used in transition"))
-                          .add(
-                              attr("echo", Type.STRING)
-                                  .value((String) null)
-                                  .nonconfigurable("used in transition"))
-                          .add(
-                              attr("platforms", BuildType.NODEP_LABEL_LIST)
-                                  .value((List<Label>) null)
-                                  .nonconfigurable("used in transition"))
-                          .add(
-                              attr("extra_execution_platforms", Type.STRING_LIST)
-                                  .value((List<String>) null)
-                                  .nonconfigurable("used in transition"))
-                          .add(
-                              attr("extra_toolchains", Type.STRING_LIST)
-                                  .value((List<String>) null)
-                                  .nonconfigurable("used in transition"));
-                    });
+                    (ruleBuilder, env) ->
+                        ruleBuilder
+                            .requiresConfigurationFragments(
+                                AConfig.class,
+                                BConfig.class,
+                                CConfig.class,
+                                DConfig.class,
+                                EConfig.class,
+                                PlatformConfiguration.class)
+                            .cfg(new TestFragmentTransitionFactory())
+                            .add(
+                                attr("deps", BuildType.LABEL_LIST)
+                                    .allowedFileTypes(FileTypeSet.ANY_FILE))
+                            .add(
+                                attr("alpha", Type.STRING)
+                                    .value((String) null)
+                                    .nonconfigurable("used in transition"))
+                            .add(
+                                attr("bravo", Type.STRING)
+                                    .value((String) null)
+                                    .nonconfigurable("used in transition"))
+                            .add(
+                                attr("charlie", Type.STRING)
+                                    .value((String) null)
+                                    .nonconfigurable("used in transition"))
+                            .add(
+                                attr("delta", Type.STRING)
+                                    .value((String) null)
+                                    .nonconfigurable("used in transition"))
+                            .add(
+                                attr("echo", Type.STRING)
+                                    .value((String) null)
+                                    .nonconfigurable("used in transition"))
+                            .add(
+                                attr("platforms", BuildType.NODEP_LABEL_LIST)
+                                    .value((List<Label>) null)
+                                    .nonconfigurable("used in transition"))
+                            .add(
+                                attr("extra_execution_platforms", Type.STRING_LIST)
+                                    .value((List<String>) null)
+                                    .nonconfigurable("used in transition"))
+                            .add(
+                                attr("extra_toolchains", Type.STRING_LIST)
+                                    .value((List<String>) null)
+                                    .nonconfigurable("used in transition")));
 
     MockRule alphaRule =
         () ->
-            MockRule.ancestor(BaseRule.class)
+            MockRule.ancestor(BaseRuleClasses.NativeBuildRule.class)
                 .factory(DepsCollectingFactory.class)
                 .define(
                     "alpha_native",
-                    (ruleBuilder, env) -> {
-                      ruleBuilder
-                          .add(
-                              attr("deps", BuildType.LABEL_LIST)
-                                  .allowedFileTypes(FileTypeSet.ANY_FILE))
-                          .requiresConfigurationFragments(AConfig.class)
-                          .setImplicitOutputsFunction(
-                              ImplicitOutputsFunction.fromTemplates("%{name}.a"));
-                    });
+                    (ruleBuilder, env) ->
+                        ruleBuilder
+                            .add(
+                                attr("deps", BuildType.LABEL_LIST)
+                                    .allowedFileTypes(FileTypeSet.ANY_FILE))
+                            .requiresConfigurationFragments(AConfig.class)
+                            .setImplicitOutputsFunction(
+                                ImplicitOutputsFunction.fromTemplates("%{name}.a")));
 
     MockRule bravoRule =
         () ->
-            MockRule.ancestor(BaseRule.class)
+            MockRule.ancestor(BaseRuleClasses.NativeBuildRule.class)
                 .factory(DepsCollectingFactory.class)
                 .define(
                     "bravo_native",
-                    (ruleBuilder, env) -> {
-                      ruleBuilder
-                          .add(
-                              attr("deps", BuildType.LABEL_LIST)
-                                  .allowedFileTypes(FileTypeSet.ANY_FILE))
-                          .requiresConfigurationFragments(BConfig.class)
-                          .setImplicitOutputsFunction(
-                              ImplicitOutputsFunction.fromTemplates("%{name}.b"));
-                    });
+                    (ruleBuilder, env) ->
+                        ruleBuilder
+                            .add(
+                                attr("deps", BuildType.LABEL_LIST)
+                                    .allowedFileTypes(FileTypeSet.ANY_FILE))
+                            .requiresConfigurationFragments(BConfig.class)
+                            .setImplicitOutputsFunction(
+                                ImplicitOutputsFunction.fromTemplates("%{name}.b")));
 
     MockRule charlieRule =
         () ->
-            MockRule.ancestor(BaseRule.class)
+            MockRule.ancestor(BaseRuleClasses.NativeBuildRule.class)
                 .factory(DepsCollectingFactory.class)
                 .define(
                     "charlie_native",
-                    (ruleBuilder, env) -> {
-                      ruleBuilder
-                          .add(
-                              attr("deps", BuildType.LABEL_LIST)
-                                  .allowedFileTypes(FileTypeSet.ANY_FILE))
-                          .requiresConfigurationFragments(CConfig.class)
-                          .setImplicitOutputsFunction(
-                              ImplicitOutputsFunction.fromTemplates("%{name}.c"));
-                    });
+                    (ruleBuilder, env) ->
+                        ruleBuilder
+                            .add(
+                                attr("deps", BuildType.LABEL_LIST)
+                                    .allowedFileTypes(FileTypeSet.ANY_FILE))
+                            .requiresConfigurationFragments(CConfig.class)
+                            .setImplicitOutputsFunction(
+                                ImplicitOutputsFunction.fromTemplates("%{name}.c")));
 
     MockRule deltaRule =
         () ->
-            MockRule.ancestor(BaseRule.class)
+            MockRule.ancestor(BaseRuleClasses.NativeBuildRule.class)
                 .factory(DepsCollectingFactory.class)
                 .define(
                     "delta_native",
-                    (ruleBuilder, env) -> {
-                      ruleBuilder
-                          .add(
-                              attr("deps", BuildType.LABEL_LIST)
-                                  .allowedFileTypes(FileTypeSet.ANY_FILE))
-                          .requiresConfigurationFragments(DConfig.class)
-                          .setImplicitOutputsFunction(
-                              ImplicitOutputsFunction.fromTemplates("%{name}.d"));
-                    });
+                    (ruleBuilder, env) ->
+                        ruleBuilder
+                            .add(
+                                attr("deps", BuildType.LABEL_LIST)
+                                    .allowedFileTypes(FileTypeSet.ANY_FILE))
+                            .requiresConfigurationFragments(DConfig.class)
+                            .setImplicitOutputsFunction(
+                                ImplicitOutputsFunction.fromTemplates("%{name}.d")));
 
     MockRule echoRule =
         () ->
-            MockRule.ancestor(BaseRule.class)
+            MockRule.ancestor(BaseRuleClasses.NativeBuildRule.class)
                 .factory(DepsCollectingFactory.class)
                 .define(
                     "echo_native",
-                    (ruleBuilder, env) -> {
-                      ruleBuilder
-                          .add(
-                              attr("deps", BuildType.LABEL_LIST)
-                                  .allowedFileTypes(FileTypeSet.ANY_FILE))
-                          .requiresConfigurationFragments(EConfig.class)
-                          .setImplicitOutputsFunction(
-                              ImplicitOutputsFunction.fromTemplates("%{name}.e"));
-                    });
+                    (ruleBuilder, env) ->
+                        ruleBuilder
+                            .add(
+                                attr("deps", BuildType.LABEL_LIST)
+                                    .allowedFileTypes(FileTypeSet.ANY_FILE))
+                            .requiresConfigurationFragments(EConfig.class)
+                            .setImplicitOutputsFunction(
+                                ImplicitOutputsFunction.fromTemplates("%{name}.e")));
 
     MockRule platformlessRule =
         () ->
-            MockRule.ancestor(BaseRule.class)
+            MockRule.ancestor(BaseRuleClasses.NativeBuildRule.class)
                 .factory(DepsCollectingFactory.class)
                 .define(
                     "platformless_native",
-                    (ruleBuilder, env) -> {
-                      ruleBuilder
-                          .add(
-                              attr("deps", BuildType.LABEL_LIST)
-                                  .allowedFileTypes(FileTypeSet.ANY_FILE))
-                          .useToolchainResolution(false)
-                          .setImplicitOutputsFunction(
-                              ImplicitOutputsFunction.fromTemplates("%{name}.np"));
-                    });
+                    (ruleBuilder, env) ->
+                        ruleBuilder
+                            .add(
+                                attr("deps", BuildType.LABEL_LIST)
+                                    .allowedFileTypes(FileTypeSet.ANY_FILE))
+                            .useToolchainResolution(ToolchainResolutionMode.DISABLED)
+                            .setImplicitOutputsFunction(
+                                ImplicitOutputsFunction.fromTemplates("%{name}.np")));
 
     MockRule platformerRule =
         () ->
-            MockRule.ancestor(BaseRule.class)
+            MockRule.ancestor(BaseRuleClasses.NativeBuildRule.class)
                 .factory(DepsCollectingFactory.class)
                 .define(
                     "platformer_native",
-                    (ruleBuilder, env) -> {
-                      ruleBuilder
-                          .add(
-                              attr("deps", BuildType.LABEL_LIST)
-                                  .allowedFileTypes(FileTypeSet.ANY_FILE))
-                          .useToolchainResolution(true)
-                          .setImplicitOutputsFunction(
-                              ImplicitOutputsFunction.fromTemplates("%{name}.p"));
-                    });
+                    (ruleBuilder, env) ->
+                        ruleBuilder
+                            .add(
+                                attr("deps", BuildType.LABEL_LIST)
+                                    .allowedFileTypes(FileTypeSet.ANY_FILE))
+                            .useToolchainResolution(ToolchainResolutionMode.ENABLED)
+                            .setImplicitOutputsFunction(
+                                ImplicitOutputsFunction.fromTemplates("%{name}.p")));
 
     builder
-        .addConfigurationFragment(AConfig.FACTORY)
-        .addConfigurationFragment(BConfig.FACTORY)
-        .addConfigurationFragment(CConfig.FACTORY)
-        .addConfigurationFragment(DConfig.FACTORY)
-        .addConfigurationFragment(EConfig.FACTORY)
+        .addConfigurationFragment(AConfig.class)
+        .addConfigurationFragment(BConfig.class)
+        .addConfigurationFragment(CConfig.class)
+        .addConfigurationFragment(DConfig.class)
+        .addConfigurationFragment(EConfig.class)
         .addRuleDefinition(transitionRule)
         .addRuleDefinition(alphaRule)
         .addRuleDefinition(bravoRule)
@@ -384,54 +376,20 @@ public final class TrimmableTestConfigurationFragments {
     if (toolchainTypeLabel != null) {
       MockRule usesToolchainsRule =
           () ->
-              MockRule.ancestor(BaseRule.class)
+              MockRule.ancestor(BaseRuleClasses.NativeBuildRule.class)
                   .factory(DepsCollectingFactory.class)
                   .define(
                       "uses_toolchains_native",
-                      (ruleBuilder, env) -> {
-                        ruleBuilder
-                            .add(
-                                attr("deps", BuildType.LABEL_LIST)
-                                    .allowedFileTypes(FileTypeSet.ANY_FILE))
-                            .useToolchainResolution(true)
-                            .addRequiredToolchains(toolchainTypeLabel)
-                            .setImplicitOutputsFunction(
-                                ImplicitOutputsFunction.fromTemplates("%{name}.u"));
-                      });
+                      (ruleBuilder, env) ->
+                          ruleBuilder
+                              .add(
+                                  attr("deps", BuildType.LABEL_LIST)
+                                      .allowedFileTypes(FileTypeSet.ANY_FILE))
+                              .useToolchainResolution(ToolchainResolutionMode.ENABLED)
+                              .addRequiredToolchains(toolchainTypeLabel)
+                              .setImplicitOutputsFunction(
+                                  ImplicitOutputsFunction.fromTemplates("%{name}.u")));
       builder.addRuleDefinition(usesToolchainsRule);
-    }
-  }
-
-  /** General purpose fragment loader for the test fragments in this file. */
-  private static final class FragmentLoader<
-          OptionsT extends FragmentOptions, FragmentT extends Fragment>
-      implements ConfigurationFragmentFactory {
-    private final Class<FragmentT> fragmentType;
-    private final Class<OptionsT> optionsType;
-    private final Function<OptionsT, FragmentT> fragmentMaker;
-
-    FragmentLoader(
-        Class<FragmentT> fragmentType,
-        Class<OptionsT> optionsType,
-        Function<OptionsT, FragmentT> fragmentMaker) {
-      this.fragmentType = fragmentType;
-      this.optionsType = optionsType;
-      this.fragmentMaker = fragmentMaker;
-    }
-
-    @Override
-    public Class<? extends Fragment> creates() {
-      return fragmentType;
-    }
-
-    @Override
-    public ImmutableSet<Class<? extends FragmentOptions>> requiredOptions() {
-      return ImmutableSet.<Class<? extends FragmentOptions>>of(optionsType);
-    }
-
-    @Override
-    public Fragment create(BuildOptions buildOptions) {
-      return fragmentMaker.apply(buildOptions.get(optionsType));
     }
   }
 
@@ -447,15 +405,12 @@ public final class TrimmableTestConfigurationFragments {
 
   /** Test configuration fragment. */
   @StarlarkBuiltin(name = "alpha", doc = "Test config fragment.")
+  @RequiresOptions(options = {AOptions.class})
   public static final class AConfig extends Fragment implements StarlarkValue {
-    public static final ConfigurationFragmentFactory FACTORY =
-        new FragmentLoader<>(
-            AConfig.class, AOptions.class, (options) -> new AConfig(options.alpha));
-
     private final String value;
 
-    public AConfig(String value) {
-      this.value = value;
+    public AConfig(BuildOptions buildOptions) {
+      this.value = buildOptions.get(AOptions.class).alpha;
     }
 
     @Override
@@ -476,15 +431,12 @@ public final class TrimmableTestConfigurationFragments {
 
   /** Test configuration fragment. */
   @StarlarkBuiltin(name = "bravo", doc = "Test config fragment.")
+  @RequiresOptions(options = {BOptions.class})
   public static final class BConfig extends Fragment implements StarlarkValue {
-    public static final ConfigurationFragmentFactory FACTORY =
-        new FragmentLoader<>(
-            BConfig.class, BOptions.class, (options) -> new BConfig(options.bravo));
-
     private final String value;
 
-    public BConfig(String value) {
-      this.value = value;
+    public BConfig(BuildOptions buildOptions) {
+      this.value = buildOptions.get(BOptions.class).bravo;
     }
 
     @Override
@@ -505,15 +457,12 @@ public final class TrimmableTestConfigurationFragments {
 
   /** Test configuration fragment. */
   @StarlarkBuiltin(name = "charlie", doc = "Test config fragment.")
+  @RequiresOptions(options = {COptions.class})
   public static final class CConfig extends Fragment implements StarlarkValue {
-    public static final ConfigurationFragmentFactory FACTORY =
-        new FragmentLoader<>(
-            CConfig.class, COptions.class, (options) -> new CConfig(options.charlie));
-
     private final String value;
 
-    public CConfig(String value) {
-      this.value = value;
+    public CConfig(BuildOptions buildOptions) {
+      this.value = buildOptions.get(COptions.class).charlie;
     }
 
     @Override
@@ -534,15 +483,12 @@ public final class TrimmableTestConfigurationFragments {
 
   /** Test configuration fragment. */
   @StarlarkBuiltin(name = "delta", doc = "Test config fragment.")
+  @RequiresOptions(options = {DOptions.class})
   public static final class DConfig extends Fragment implements StarlarkValue {
-    public static final ConfigurationFragmentFactory FACTORY =
-        new FragmentLoader<>(
-            DConfig.class, DOptions.class, (options) -> new DConfig(options.delta));
-
     private final String value;
 
-    public DConfig(String value) {
-      this.value = value;
+    public DConfig(BuildOptions buildOptions) {
+      this.value = buildOptions.get(DOptions.class).delta;
     }
 
     @Override
@@ -566,14 +512,12 @@ public final class TrimmableTestConfigurationFragments {
 
   /** Test configuration fragment. */
   @StarlarkBuiltin(name = "echo", doc = "Test config fragment.")
+  @RequiresOptions(options = {EOptions.class})
   public static final class EConfig extends Fragment implements StarlarkValue {
-    public static final ConfigurationFragmentFactory FACTORY =
-        new FragmentLoader<>(EConfig.class, EOptions.class, (options) -> new EConfig(options.echo));
-
     private final String value;
 
-    public EConfig(String value) {
-      this.value = value;
+    public EConfig(BuildOptions buildOptions) {
+      this.value = buildOptions.get(EOptions.class).echo;
     }
 
     @Override

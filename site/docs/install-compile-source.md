@@ -1,9 +1,13 @@
 ---
 layout: documentation
 title: Compiling Bazel from source
+category: getting-started
 ---
 
-<h1 id="compiling-from-source">Compiling Bazel from source</h1>
+<h1 id="compiling-from-source">Compiling Bazel from Source</h1>
+
+This page describes how to install Bazel from source and provides
+troubleshooting tips for common issues.
 
 To build Bazel from source, you can do one of the following:
 
@@ -14,7 +18,7 @@ To build Bazel from source, you can do one of the following:
 
 <h2 id="build-bazel-using-bazel">Build Bazel using Bazel</h2>
 
-TL;DR:
+<h3 id="summary">Summary</h3>
 
 1.  Get the latest Bazel release from the
     [GitHub release page](https://github.com/bazelbuild/bazel/releases) or with
@@ -175,7 +179,7 @@ You can also build Bazel from scratch, without using an existing Bazel binary.
 
 2.  Unpack the distribution archive somewhere on disk.
 
-    We recommend to also verify the signature made by our
+    You should verify the signature made by Bazel's
     [release key](https://bazel.build/bazel-release.pub.gpg) 3D5919B448457EE0.
 
 <h3 id="bootstrap-unix">Step 2a: Bootstrap Bazel on Ubuntu Linux, macOS, and other Unix-like systems</h3>
@@ -212,8 +216,8 @@ sudo apt-get install build-essential openjdk-11-jdk python zip unzip
 
 The compiled output is placed into `output/bazel`. This is a self-contained
 Bazel binary, without an embedded JDK. You can copy it anywhere or use it
-in-place. For convenience we recommend copying this binary to a directory that's
-on your `PATH` (such as `/usr/local/bin` on Linux).
+in-place. For convenience, copy this binary to a directory that's on your
+`PATH` (such as `/usr/local/bin` on Linux).
 
 To build the `bazel` binary in a reproducible way, also set
 [`SOURCE_DATE_EPOCH`](https://reproducible-builds.org/specs/source-date-epoch/)
@@ -283,8 +287,8 @@ Unix-like systems.)
 
 The compiled output is placed into `output/bazel.exe`. This is a self-contained
 Bazel binary, without an embedded JDK. You can copy it anywhere or use it
-in-place. For convenience we recommend copying this binary to a directory that's
-on your `PATH`.
+in-place. For convenience, copy this binary to a directory that's on
+your `PATH`.
 
 To build the `bazel.exe` binary in a reproducible way, also set
 [`SOURCE_DATE_EPOCH`](https://reproducible-builds.org/specs/source-date-epoch/)

@@ -25,10 +25,10 @@ import com.google.devtools.build.lib.packages.CachingPackageLocator;
 import com.google.devtools.build.lib.packages.NoSuchThingException;
 import com.google.devtools.build.lib.packages.Package;
 import com.google.devtools.build.lib.packages.Target;
+import com.google.devtools.build.lib.pkgcache.QueryTransitivePackagePreloader;
 import com.google.devtools.build.lib.pkgcache.TargetEdgeObserver;
 import com.google.devtools.build.lib.pkgcache.TargetPatternPreloader;
 import com.google.devtools.build.lib.pkgcache.TargetProvider;
-import com.google.devtools.build.lib.pkgcache.TransitivePackageLoader;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
 import com.google.devtools.build.lib.query2.common.AbstractBlazeQueryEnvironment;
@@ -45,13 +45,13 @@ import com.google.devtools.build.lib.query2.engine.QueryUtil.ThreadSafeMutableKe
 import com.google.devtools.build.lib.query2.engine.QueryUtil.UniquifierImpl;
 import com.google.devtools.build.lib.query2.engine.SkyframeRestartQueryException;
 import com.google.devtools.build.lib.query2.engine.Uniquifier;
-import com.google.devtools.build.lib.skyframe.SkyframeLabelVisitor;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -75,7 +75,7 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
   private final Map<String, Collection<Target>> resolvedTargetPatterns = new HashMap<>();
   private final TargetPatternPreloader targetPatternPreloader;
   private final PathFragment relativeWorkingDirectory;
-  private final TransitivePackageLoader transitivePackageLoader;
+  private final QueryTransitivePackagePreloader queryTransitivePackagePreloader;
   private final TargetProvider targetProvider;
   private final CachingPackageLocator cachingPackageLocator;
   private final ErrorPrintingTargetEdgeErrorObserver errorObserver;
@@ -97,7 +97,7 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
    * @param settings a set of enabled settings
    */
   public GraphlessBlazeQueryEnvironment(
-      TransitivePackageLoader transitivePackageLoader,
+      QueryTransitivePackagePreloader queryTransitivePackagePreloader,
       TargetProvider targetProvider,
       CachingPackageLocator cachingPackageLocator,
       TargetPatternPreloader targetPatternPreloader,
@@ -112,7 +112,7 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
     super(keepGoing, strictScope, labelFilter, eventHandler, settings, extraFunctions);
     this.targetPatternPreloader = targetPatternPreloader;
     this.relativeWorkingDirectory = relativeWorkingDirectory;
-    this.transitivePackageLoader = transitivePackageLoader;
+    this.queryTransitivePackagePreloader = queryTransitivePackagePreloader;
     this.targetProvider = targetProvider;
     this.cachingPackageLocator = cachingPackageLocator;
     this.errorObserver = new ErrorPrintingTargetEdgeErrorObserver(this.eventHandler);
@@ -122,10 +122,25 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
 
   @Override
   public QueryTaskFuture<Void> eval(
+      QueryExpression expr,
+      QueryExpressionContext<Target> context,
+      Callback<Target> callback,
+      boolean batch) {
+    if (batch) {
+      // This uses AbstractQueryEnvironment#eval that aggregates the results of the futures into a
+      // single batch before running the callback on the batch of results, providing an alternative
+      // for the environment to decide when to batch the results and when batching is not needed.
+      return super.eval(expr, context, callback);
+    }
+    return eval(expr, context, callback);
+  }
+
+  @Override
+  public QueryTaskFuture<Void> eval(
       QueryExpression expr, QueryExpressionContext<Target> context, Callback<Target> callback) {
-    // The graphless query implementation does not perform any streaming at this point, and all
-    // operators only make a single call to the callback, so it is perfectly safe to pass the
-    // callback to the expression eval call. This is also a lot cheaper than making a copy here.
+    // The graphless query implementation does not perform any streaming at this point. However,
+    // not all operators return a single future (e.g. 'SetExpression'), as such, do not use this if
+    // the callback does heavy blocking work (e.g. 'deps').
     return expr.eval(this, context, callback);
   }
 
@@ -154,7 +169,9 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
 
   private void getTargetsMatchingPatternImpl(String pattern, Callback<Target> callback)
       throws QueryException, InterruptedException {
-    callback.process(resolvedTargetPatterns.get(pattern));
+    Set<Target> targets = new LinkedHashSet<>(resolvedTargetPatterns.get(pattern));
+    validateScopeOfTargets(targets);
+    callback.process(targets);
   }
 
   @Override
@@ -239,6 +256,9 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
   public void somePath(
       Iterable<Target> from, Iterable<Target> to, QueryExpression caller, Callback<Target> callback)
       throws InterruptedException, QueryException {
+    try (SilentCloseable closeable = Profiler.instance().profile("preloadTransitiveClosure")) {
+      preloadTransitiveClosure(from, /*maxDepth=*/ Integer.MAX_VALUE);
+    }
     try {
       callback.process(
           new PathLabelVisitor(targetProvider, dependencyFilter).somePath(eventHandler, from, to));
@@ -252,6 +272,9 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
   public void allPaths(
       Iterable<Target> from, Iterable<Target> to, QueryExpression caller, Callback<Target> callback)
       throws InterruptedException, QueryException {
+    try (SilentCloseable closeable = Profiler.instance().profile("preloadTransitiveClosure")) {
+      preloadTransitiveClosure(from, /*maxDepth=*/ Integer.MAX_VALUE);
+    }
     try {
       callback.process(
           new PathLabelVisitor(targetProvider, dependencyFilter).allPaths(eventHandler, from, to));
@@ -264,6 +287,13 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
   public void samePkgDirectRdeps(
       Iterable<Target> from, QueryExpression caller, Callback<Target> callback)
       throws InterruptedException, QueryException {
+    Set<Target> targetsToPreload = new HashSet<>();
+    for (Target t : from) {
+      targetsToPreload.addAll(getSiblingTargetsInPackage(t));
+    }
+    try (SilentCloseable closeable = Profiler.instance().profile("preloadTransitiveClosure")) {
+      preloadTransitiveClosure(targetsToPreload, /*maxDepth=*/ 1);
+    }
     try {
       callback.process(
           new PathLabelVisitor(targetProvider, dependencyFilter)
@@ -281,6 +311,9 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
       QueryExpression caller,
       Callback<Target> callback)
       throws InterruptedException, QueryException {
+    try (SilentCloseable closeable = Profiler.instance().profile("preloadTransitiveClosure")) {
+      preloadTransitiveClosure(universe, maxDepth);
+    }
     try {
       callback.process(
           new PathLabelVisitor(targetProvider, dependencyFilter)
@@ -340,15 +373,15 @@ public class GraphlessBlazeQueryEnvironment extends AbstractBlazeQueryEnvironmen
 
   private void preloadTransitiveClosure(Iterable<Target> targets, int maxDepth)
       throws InterruptedException {
-    if (maxDepth >= MAX_DEPTH_FULL_SCAN_LIMIT && transitivePackageLoader != null) {
+    if (maxDepth >= MAX_DEPTH_FULL_SCAN_LIMIT && queryTransitivePackagePreloader != null) {
       // Only do the full visitation if "maxDepth" is large enough. Otherwise, the benefits of
       // preloading will be outweighed by the cost of doing more work than necessary.
       Set<Label> labels = CompactHashSet.create();
       for (Target t : targets) {
         labels.add(t.getLabel());
       }
-      ((SkyframeLabelVisitor) transitivePackageLoader)
-          .sync(eventHandler, labels, keepGoing, loadingPhaseThreads, /* errorOnCycles= */ false);
+      queryTransitivePackagePreloader.preloadTransitiveTargets(
+          eventHandler, labels, keepGoing, loadingPhaseThreads);
     }
   }
 

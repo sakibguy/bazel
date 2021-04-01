@@ -24,6 +24,7 @@ import com.google.errorprone.annotations.DoNotCall;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
 import net.starlark.java.annot.Param;
 import net.starlark.java.annot.ParamType;
 import net.starlark.java.annot.StarlarkBuiltin;
@@ -79,7 +80,7 @@ public final class StarlarkEvaluationTest {
   }
 
   // A trivial struct-like class with Starlark fields defined by a map.
-  private static class SimpleStruct implements StarlarkValue, ClassObject {
+  private static class SimpleStruct implements StarlarkValue, Structure {
     final ImmutableMap<String, Object> fields;
 
     SimpleStruct(ImmutableMap<String, Object> fields) {
@@ -122,7 +123,7 @@ public final class StarlarkEvaluationTest {
         selfCall = true,
         documented = false,
         parameters = {
-          @Param(name = "pos", positional = true, type = String.class),
+          @Param(name = "pos", positional = true),
         })
     public String selfCall(String myName) {
       return "I'm a mock named " + myName;
@@ -130,7 +131,7 @@ public final class StarlarkEvaluationTest {
 
     @StarlarkMethod(
         name = "value_of",
-        parameters = {@Param(name = "str", type = String.class)},
+        parameters = {@Param(name = "str")},
         documented = false)
     public Integer valueOf(String str) {
       return Integer.valueOf(str);
@@ -138,7 +139,7 @@ public final class StarlarkEvaluationTest {
 
     @StarlarkMethod(
         name = "is_empty",
-        parameters = {@Param(name = "str", type = String.class)},
+        parameters = {@Param(name = "str")},
         documented = false)
     public Boolean isEmpty(String str) {
       return str.isEmpty();
@@ -185,8 +186,8 @@ public final class StarlarkEvaluationTest {
     @StarlarkMethod(
         name = "nullfunc_failing",
         parameters = {
-          @Param(name = "p1", type = String.class),
-          @Param(name = "p2", type = StarlarkInt.class),
+          @Param(name = "p1"),
+          @Param(name = "p2"),
         },
         documented = false,
         allowReturnNones = false)
@@ -195,6 +196,7 @@ public final class StarlarkEvaluationTest {
     }
 
     @StarlarkMethod(name = "nullfunc_working", documented = false, allowReturnNones = true)
+    @Nullable
     public StarlarkValue nullfuncWorking() {
       return null;
     }
@@ -214,7 +216,7 @@ public final class StarlarkEvaluationTest {
 
     @StarlarkMethod(name = "string_list_dict", documented = false)
     public Map<String, List<String>> stringListDict() {
-      return ImmutableMap.of("a", ImmutableList.of("b", "c"));
+      return ImmutableMap.of("a", StarlarkList.immutableOf("b", "c"));
     }
 
     @StarlarkMethod(
@@ -222,31 +224,18 @@ public final class StarlarkEvaluationTest {
         documented = false,
         parameters = {
           @Param(name = "pos1"),
-          @Param(name = "pos2", defaultValue = "False", type = Boolean.class),
-          @Param(
-              name = "posOrNamed",
-              defaultValue = "False",
-              type = Boolean.class,
-              positional = true,
-              named = true),
-          @Param(name = "named", type = Boolean.class, positional = false, named = true),
-          @Param(
-              name = "optionalNamed",
-              type = Boolean.class,
-              defaultValue = "False",
-              positional = false,
-              named = true),
-          @Param(
-              name = "acceptsAny",
-              type = Object.class,
-              defaultValue = "\"a\"",
-              positional = false,
-              named = true),
+          @Param(name = "pos2", defaultValue = "False"),
+          @Param(name = "posOrNamed", defaultValue = "False", positional = true, named = true),
+          @Param(name = "named", positional = false, named = true),
+          @Param(name = "optionalNamed", defaultValue = "False", positional = false, named = true),
+          @Param(name = "acceptsAny", defaultValue = "'a'", positional = false, named = true),
           @Param(
               name = "noneable",
-              type = StarlarkInt.class,
+              allowedTypes = {
+                @ParamType(type = StarlarkInt.class),
+                @ParamType(type = NoneType.class),
+              },
               defaultValue = "None",
-              noneable = true,
               positional = false,
               named = true),
           @Param(
@@ -255,9 +244,9 @@ public final class StarlarkEvaluationTest {
                 @ParamType(type = String.class),
                 @ParamType(type = StarlarkInt.class),
                 @ParamType(type = Sequence.class, generic1 = StarlarkInt.class),
+                @ParamType(type = NoneType.class),
               },
               defaultValue = "None",
-              noneable = true,
               positional = false,
               named = true)
         })
@@ -297,31 +286,18 @@ public final class StarlarkEvaluationTest {
         documented = false,
         parameters = {
           @Param(name = "pos1"),
-          @Param(name = "pos2", defaultValue = "False", type = Boolean.class),
-          @Param(
-              name = "posOrNamed",
-              defaultValue = "False",
-              type = Boolean.class,
-              positional = true,
-              named = true),
-          @Param(name = "named", type = Boolean.class, positional = false, named = true),
-          @Param(
-              name = "optionalNamed",
-              type = Boolean.class,
-              defaultValue = "False",
-              positional = false,
-              named = true),
-          @Param(
-              name = "acceptsAny",
-              type = Object.class,
-              defaultValue = "\"a\"",
-              positional = false,
-              named = true),
+          @Param(name = "pos2", defaultValue = "False"),
+          @Param(name = "posOrNamed", defaultValue = "False", positional = true, named = true),
+          @Param(name = "named", positional = false, named = true),
+          @Param(name = "optionalNamed", defaultValue = "False", positional = false, named = true),
+          @Param(name = "acceptsAny", defaultValue = "'a'", positional = false, named = true),
           @Param(
               name = "noneable",
-              type = StarlarkInt.class,
+              allowedTypes = {
+                @ParamType(type = StarlarkInt.class),
+                @ParamType(type = NoneType.class),
+              },
               defaultValue = "None",
-              noneable = true,
               positional = false,
               named = true),
           @Param(
@@ -330,9 +306,9 @@ public final class StarlarkEvaluationTest {
                 @ParamType(type = String.class),
                 @ParamType(type = StarlarkInt.class),
                 @ParamType(type = Sequence.class, generic1 = StarlarkInt.class),
+                @ParamType(type = NoneType.class),
               },
               defaultValue = "None",
-              noneable = true,
               positional = false,
               named = true)
         },
@@ -369,9 +345,8 @@ public final class StarlarkEvaluationTest {
     @StarlarkMethod(
         name = "proxy_methods_object",
         doc = "Returns a struct containing all callable method objects of this mock",
-        allowReturnNones = true,
         useStarlarkThread = true)
-    public ClassObject proxyMethodsObject(StarlarkThread thread)
+    public Structure proxyMethodsObject(StarlarkThread thread)
         throws EvalException, InterruptedException {
       ImmutableMap.Builder<String, Object> builder = ImmutableMap.builder();
       for (String name : Starlark.dir(thread.mutability(), thread.getSemantics(), this)) {
@@ -388,9 +363,9 @@ public final class StarlarkEvaluationTest {
         name = "with_args_and_thread",
         documented = false,
         parameters = {
-          @Param(name = "pos1", type = StarlarkInt.class),
-          @Param(name = "pos2", defaultValue = "False", type = Boolean.class),
-          @Param(name = "named", type = Boolean.class, positional = false, named = true),
+          @Param(name = "pos1"),
+          @Param(name = "pos2", defaultValue = "False"),
+          @Param(name = "named", positional = false, named = true),
         },
         extraPositionals = @Param(name = "args"),
         useStarlarkThread = true)
@@ -412,8 +387,8 @@ public final class StarlarkEvaluationTest {
         name = "with_kwargs",
         documented = false,
         parameters = {
-          @Param(name = "pos", defaultValue = "False", type = Boolean.class),
-          @Param(name = "named", type = Boolean.class, positional = false, named = true),
+          @Param(name = "pos", defaultValue = "False"),
+          @Param(name = "named", positional = false, named = true),
         },
         extraKeywords = @Param(name = "kwargs"))
     public String withKwargs(boolean pos, boolean named, Dict<String, Object> kwargs) {
@@ -432,11 +407,11 @@ public final class StarlarkEvaluationTest {
         name = "with_args_and_kwargs",
         documented = false,
         parameters = {
-          @Param(name = "foo", named = true, positional = true, type = String.class),
+          @Param(name = "foo", named = true, positional = true),
         },
         extraPositionals = @Param(name = "args"),
         extraKeywords = @Param(name = "kwargs"))
-    public String withArgsAndKwargs(String foo, Tuple<Object> args, Dict<String, Object> kwargs) {
+    public String withArgsAndKwargs(String foo, Tuple args, Dict<String, Object> kwargs) {
       String argsString = debugPrintArgs(args);
       String kwargsString =
           "kwargs("
@@ -475,7 +450,7 @@ public final class StarlarkEvaluationTest {
   static interface MockInterface extends StarlarkValue {
     @StarlarkMethod(
         name = "is_empty_interface",
-        parameters = {@Param(name = "str", type = String.class)},
+        parameters = {@Param(name = "str")},
         documented = false)
     public Boolean isEmptyInterface(String str);
   }
@@ -498,7 +473,7 @@ public final class StarlarkEvaluationTest {
         name = "method",
         documented = false,
         parameters = {
-          @Param(name = "foo", named = true, positional = true, type = Object.class),
+          @Param(name = "foo", named = true, positional = true),
         })
     public ObjectT method(ObjectT o);
   }
@@ -1038,7 +1013,7 @@ public final class StarlarkEvaluationTest {
   @Test
   public void testJavaCallsNoMethodErrorMsg() throws Exception {
     ev.new Scenario()
-        .testIfExactError("'int' value has no field or method 'bad'", "s = 3.bad('a', 'b', 'c')");
+        .testIfExactError("'int' value has no field or method 'bad'", "s = (3).bad('a', 'b', 'c')");
   }
 
   @Test
@@ -1174,8 +1149,8 @@ public final class StarlarkEvaluationTest {
         .update("mock", new Mock())
         .setUp("")
         .testIfExactError(
-            "in call to with_params(), parameter 'multi' got value of type 'bool', want 'string or"
-                + " int or sequence or NoneType'",
+            "in call to with_params(), parameter 'multi' got value of type 'bool', "
+                + "want 'string, int, sequence, or NoneType'",
             "mock.with_params(1, True, named=True, multi=False)");
 
     // We do not enforce list item parameter type constraints.
@@ -1189,7 +1164,7 @@ public final class StarlarkEvaluationTest {
   @Test
   public void testNoJavaCallsWithoutStarlark() throws Exception {
     ev.new Scenario()
-        .testIfExactError("'int' value has no field or method 'to_string'", "s = 3.to_string()");
+        .testIfExactError("'int' value has no field or method 'to_string'", "s = (3).to_string()");
   }
 
   @Test
@@ -1379,7 +1354,9 @@ public final class StarlarkEvaluationTest {
 
   @Test
   public void testStructAccessOfMethod() throws Exception {
-    ev.new Scenario().update("mock", new Mock()).testExpression("type(mock.function)", "function");
+    ev.new Scenario()
+        .update("mock", new Mock())
+        .testExpression("type(mock.function)", "builtin_function_or_method");
     ev.new Scenario().update("mock", new Mock()).testExpression("mock.function()", "a");
   }
 
@@ -1704,7 +1681,11 @@ public final class StarlarkEvaluationTest {
     ev.new Scenario()
         .setUp("def func(d):", "  d['b'] = 2", "d = {'a' : 1}", "func(d)")
         .testLookup(
-            "d", Dict.of((Mutability) null, "a", StarlarkInt.of(1), "b", StarlarkInt.of(2)));
+            "d",
+            Dict.builder()
+                .put("a", StarlarkInt.of(1))
+                .put("b", StarlarkInt.of(2))
+                .buildImmutable());
   }
 
   @Test
@@ -1776,7 +1757,7 @@ public final class StarlarkEvaluationTest {
   }
 
   @Test
-  public void testFunctionCallRecursion() throws Exception {
+  public void testRecursionDisallowedByDefault() throws Exception {
     ev.new Scenario()
         .testIfErrorContains(
             "function 'f' called recursively",
@@ -1787,6 +1768,22 @@ public final class StarlarkEvaluationTest {
             "def g(n):",
             "  if n > 0: f(n - 1)",
             "main()");
+  }
+
+  @Test
+  public void testRecursionAllowedWithOption() throws Exception {
+    ParserInput input =
+        ParserInput.fromLines(
+            "def fac(n): return 1 if n < 2 else n * fac(n - 1)", //
+            "x = fac(5)");
+    Module module = Module.create();
+    try (Mutability mu = Mutability.create("test")) {
+      StarlarkSemantics semantics =
+          StarlarkSemantics.builder().setBool(StarlarkSemantics.ALLOW_RECURSION, true).build();
+      StarlarkThread thread = new StarlarkThread(mu, semantics);
+      Starlark.execFile(input, FileOptions.DEFAULT, module, thread);
+    }
+    assertThat(module.getGlobal("x")).isEqualTo(StarlarkInt.of(120));
   }
 
   @Test
@@ -2034,7 +2031,7 @@ public final class StarlarkEvaluationTest {
   @Test
   public void testStructMethodDefinedInValuesAndStarlarkMethod() throws Exception {
     // This test exercises the resolution of ambiguity between @StarlarkMethod-annotated
-    // fields and those reported by ClassObject.getValue.
+    // fields and those reported by Structure.getValue.
     ev.new Scenario()
         .update("val", new SimpleStructWithMethods())
         .setUp("v = val.collision_method()")

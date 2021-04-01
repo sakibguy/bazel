@@ -13,31 +13,28 @@
 // limitations under the License.
 package com.google.devtools.build.lib.rules.java;
 
-import static com.google.common.base.Preconditions.checkState;
-
 import com.google.auto.value.AutoValue;
 import com.google.common.base.Ascii;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
+import com.google.devtools.build.lib.analysis.PlatformOptions;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
 import com.google.devtools.build.lib.analysis.config.CoreOptionConverters.StrictDepsMode;
 import com.google.devtools.build.lib.analysis.config.Fragment;
 import com.google.devtools.build.lib.analysis.config.InvalidConfigurationException;
+import com.google.devtools.build.lib.analysis.config.RequiresOptions;
 import com.google.devtools.build.lib.analysis.starlark.annotations.StarlarkConfigurationField;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.cmdline.LabelSyntaxException;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.events.Event;
-import com.google.devtools.build.lib.events.EventHandler;
 import com.google.devtools.build.lib.starlarkbuildapi.java.JavaConfigurationApi;
-import com.google.devtools.common.options.TriState;
 import java.util.Map;
+import java.util.Objects;
 import javax.annotation.Nullable;
 
 /** A java compiler configuration containing the flags required for compilation. */
 @Immutable
+@RequiresOptions(options = {JavaOptions.class, PlatformOptions.class})
 public final class JavaConfiguration extends Fragment implements JavaConfigurationApi {
 
   /** Values for the --java_classpath option */
@@ -90,33 +87,30 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
   private final JavaClasspathMode javaClasspath;
   private final boolean inmemoryJdepsFiles;
   private final ImmutableList<String> defaultJvmFlags;
-  private final ImmutableList<String> checkedConstraints;
   private final StrictDepsMode strictJavaDeps;
   private final String fixDepsTool;
   private final Label proguardBinary;
   private final ImmutableList<Label> extraProguardSpecs;
-  private final TriState bundleTranslations;
-  private final ImmutableList<Label> translationTargets;
   private final NamedLabel bytecodeOptimizer;
   private final boolean splitBytecodeOptimizationPass;
   private final boolean enforceProguardFileExtension;
   private final Label toolchainLabel;
   private final Label runtimeLabel;
+  private final boolean runAndroidLint;
+  private final boolean limitAndroidLintToAndroidCompatible;
   private final boolean explicitJavaTestDeps;
   private final boolean jplPropagateCcLinkParamsStore;
   private final boolean addTestSupportToCompileTimeDeps;
-  private final boolean isJlplStrictDepsEnforced;
   private final ImmutableList<Label> pluginList;
-  private final boolean requireJavaToolchainHeaderCompilerDirect;
   private final boolean disallowResourceJars;
-  private final boolean loadJavaRulesFromBzl;
   private final boolean disallowLegacyJavaToolchainFlags;
   private final boolean experimentalTurbineAnnotationProcessing;
 
   // TODO(dmarting): remove once we have a proper solution for #2539
   private final boolean useLegacyBazelJavaTest;
 
-  JavaConfiguration(JavaOptions javaOptions) throws InvalidConfigurationException {
+  public JavaConfiguration(BuildOptions buildOptions) throws InvalidConfigurationException {
+    JavaOptions javaOptions = buildOptions.get(JavaOptions.class);
     this.commandLineJavacFlags =
         ImmutableList.copyOf(JavaHelper.tokenizeJavaOptions(javaOptions.javacOpts));
     this.javaLauncherLabel = javaOptions.javaLauncher;
@@ -127,14 +121,12 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
     this.javaClasspath = javaOptions.javaClasspath;
     this.inmemoryJdepsFiles = javaOptions.inmemoryJdepsFiles;
     this.defaultJvmFlags = ImmutableList.copyOf(javaOptions.jvmOpts);
-    this.checkedConstraints = ImmutableList.copyOf(javaOptions.checkedConstraints);
     this.strictJavaDeps = javaOptions.strictJavaDeps;
     this.fixDepsTool = javaOptions.fixDepsTool;
     this.proguardBinary = javaOptions.proguard;
     this.extraProguardSpecs = ImmutableList.copyOf(javaOptions.extraProguardSpecs);
     this.splitBytecodeOptimizationPass = javaOptions.splitBytecodeOptimizationPass;
     this.enforceProguardFileExtension = javaOptions.enforceProguardFileExtension;
-    this.bundleTranslations = javaOptions.bundleTranslations;
     this.toolchainLabel = javaOptions.javaToolchain;
     this.runtimeLabel = javaOptions.javaBase;
     this.useLegacyBazelJavaTest = javaOptions.legacyBazelJavaTest;
@@ -146,33 +138,19 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
     this.allowRuntimeDepsOnNeverLink = javaOptions.allowRuntimeDepsOnNeverLink;
     this.explicitJavaTestDeps = javaOptions.explicitJavaTestDeps;
     this.jplPropagateCcLinkParamsStore = javaOptions.jplPropagateCcLinkParamsStore;
-    this.isJlplStrictDepsEnforced = javaOptions.isJlplStrictDepsEnforced;
     this.disallowResourceJars = javaOptions.disallowResourceJars;
-    this.loadJavaRulesFromBzl = javaOptions.loadJavaRulesFromBzl;
     this.addTestSupportToCompileTimeDeps = javaOptions.addTestSupportToCompileTimeDeps;
-
-    ImmutableList.Builder<Label> translationsBuilder = ImmutableList.builder();
-    for (String s : javaOptions.translationTargets) {
-      try {
-        Label label = Label.parseAbsolute(s, ImmutableMap.of());
-        translationsBuilder.add(label);
-      } catch (LabelSyntaxException e) {
-        throw new InvalidConfigurationException(
-            "Invalid translations target '"
-                + s
-                + "', make "
-                + "sure it uses correct absolute path syntax.",
-            e);
-      }
-    }
-    this.translationTargets = translationsBuilder.build();
+    this.runAndroidLint = javaOptions.runAndroidLint;
+    this.limitAndroidLintToAndroidCompatible = javaOptions.limitAndroidLintToAndroidCompatible;
 
     Map<String, Label> optimizers = javaOptions.bytecodeOptimizers;
-    checkState(
-        optimizers.size() <= 1,
-        "--experimental_bytecode_optimizers can only accept up to one mapping, but %s mappings "
-            + "were provided.",
-        optimizers.size());
+    if (optimizers.size() > 1) {
+      throw new InvalidConfigurationException(
+          String.format(
+              "--experimental_bytecode_optimizers can only accept up to one mapping, but %s"
+                  + " mappings were provided.",
+              optimizers.size()));
+    }
     Map.Entry<String, Label> optimizer = Iterables.getOnlyElement(optimizers.entrySet());
     String mnemonic = optimizer.getKey();
     Label optimizerLabel = optimizer.getValue();
@@ -182,38 +160,28 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
     this.bytecodeOptimizer = NamedLabel.create(mnemonic, Optional.fromNullable(optimizerLabel));
 
     this.pluginList = ImmutableList.copyOf(javaOptions.pluginList);
-    this.requireJavaToolchainHeaderCompilerDirect =
-        javaOptions.requireJavaToolchainHeaderCompilerDirect;
     this.disallowLegacyJavaToolchainFlags = javaOptions.disallowLegacyJavaToolchainFlags;
     this.experimentalTurbineAnnotationProcessing =
         javaOptions.experimentalTurbineAnnotationProcessing;
 
     if (javaOptions.disallowLegacyJavaToolchainFlags) {
-      if (!javaOptions.javaBase.equals(javaOptions.defaultJavaBase())) {
-        throw new InvalidConfigurationException(
-            String.format(
-                "--javabase=%s is no longer supported, use --platforms instead (see #7849)",
-                javaOptions.javaBase));
-      }
-      if (!javaOptions.getHostJavaBase().equals(javaOptions.defaultHostJavaBase())) {
-        throw new InvalidConfigurationException(
-            String.format(
-                "--host_javabase=%s is no longer supported, use --platforms instead (see #7849)",
-                javaOptions.getHostJavaBase()));
-      }
-      if (!javaOptions.javaToolchain.equals(javaOptions.defaultJavaToolchain())) {
-        throw new InvalidConfigurationException(
-            String.format(
-                "--java_toolchain=%s is no longer supported, use --platforms instead (see #7849)",
-                javaOptions.javaToolchain));
-      }
-      if (!javaOptions.hostJavaToolchain.equals(javaOptions.defaultJavaToolchain())) {
-        throw new InvalidConfigurationException(
-            String.format(
-                "--host_java_toolchain=%s is no longer supported, use --platforms instead (see"
-                    + " #7849)",
-                javaOptions.hostJavaToolchain));
-      }
+      checkLegacyToolchainFlagIsUnset(
+          "javabase", javaOptions.javaBase, javaOptions.defaultJavaBase());
+      checkLegacyToolchainFlagIsUnset(
+          "host_javabase", javaOptions.getHostJavaBase(), javaOptions.defaultHostJavaBase());
+      checkLegacyToolchainFlagIsUnset(
+          "java_toolchain", javaOptions.javaToolchain, javaOptions.defaultJavaToolchain());
+      checkLegacyToolchainFlagIsUnset(
+          "host_java_toolchain", javaOptions.hostJavaToolchain, javaOptions.defaultJavaToolchain());
+    }
+  }
+
+  private static void checkLegacyToolchainFlagIsUnset(String flag, Label label, Label defaultValue)
+      throws InvalidConfigurationException {
+    if (!Objects.equals(label, defaultValue)) {
+      throw new InvalidConfigurationException(
+          String.format(
+              "--%s=%s is no longer supported, use --platforms instead (see #7849)", flag, label));
     }
   }
 
@@ -227,16 +195,6 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
   @Override
   public String getStrictJavaDepsName() {
     return Ascii.toLowerCase(strictJavaDeps.name());
-  }
-
-  @Override
-  public void reportInvalidOptions(EventHandler reporter, BuildOptions buildOptions) {
-    if ((bundleTranslations == TriState.YES) && translationTargets.isEmpty()) {
-      reporter.handle(
-          Event.error(
-              "Translations enabled, but no message translations specified. "
-                  + "Use '--message_translations' to select the message translations to use"));
-    }
   }
 
   /** Returns true iff Java compilation should use ijars. */
@@ -264,10 +222,6 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
 
   public ImmutableList<String> getDefaultJvmFlags() {
     return defaultJvmFlags;
-  }
-
-  public ImmutableList<String> getCheckedConstraints() {
-    return checkedConstraints;
   }
 
   public StrictDepsMode getStrictJavaDeps() {
@@ -323,21 +277,6 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
     return enforceProguardFileExtension;
   }
 
-  /** Returns the raw translation targets. */
-  public ImmutableList<Label> getTranslationTargets() {
-    return translationTargets;
-  }
-
-  /** Returns true if the we should build translations. */
-  public boolean buildTranslations() {
-    return (bundleTranslations != TriState.NO) && !translationTargets.isEmpty();
-  }
-
-  /** Returns whether translations were explicitly disabled. */
-  public boolean isTranslationsDisabled() {
-    return bundleTranslations == TriState.NO;
-  }
-
   /** Returns the label of the default java_toolchain rule */
   @StarlarkConfigurationField(
       name = "java_toolchain",
@@ -380,7 +319,6 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
   public boolean useLegacyBazelJavaTest() {
     return useLegacyBazelJavaTest;
   }
-
 
   /**
    * Make it mandatory for java_test targets to explicitly declare any JUnit or Hamcrest
@@ -429,8 +367,12 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
     return addTestSupportToCompileTimeDeps;
   }
 
-  public boolean isJlplStrictDepsEnforced() {
-    return isJlplStrictDepsEnforced;
+  public boolean runAndroidLint() {
+    return runAndroidLint;
+  }
+
+  public boolean limitAndroidLintToAndroidCompatible() {
+    return limitAndroidLintToAndroidCompatible;
   }
 
   @Override
@@ -438,16 +380,8 @@ public final class JavaConfiguration extends Fragment implements JavaConfigurati
     return pluginList;
   }
 
-  public boolean requireJavaToolchainHeaderCompilerDirect() {
-    return requireJavaToolchainHeaderCompilerDirect;
-  }
-
   public boolean disallowResourceJars() {
     return disallowResourceJars;
-  }
-
-  public boolean loadJavaRulesFromBzl() {
-    return loadJavaRulesFromBzl;
   }
 
   public boolean experimentalTurbineAnnotationProcessing() {

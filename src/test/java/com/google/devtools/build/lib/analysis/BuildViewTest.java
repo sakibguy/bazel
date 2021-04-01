@@ -588,17 +588,6 @@ public class BuildViewTest extends BuildViewTestBase {
     assertThat(e).hasMessageThat().isEqualTo("Unrecognized option: --output directory name=foo");
   }
 
-  @Test
-  public void testFileTranslations() throws Exception {
-    scratch.file("foo/file");
-    scratch.file("foo/BUILD",
-        "exports_files(['file'])");
-    useConfiguration("--message_translations=//foo:file");
-    scratch.file("bar/BUILD",
-        "sh_library(name = 'bar')");
-    update("//bar");
-  }
-
   // Regression test: "output_filter broken (but in a different way)"
   @Test
   public void testOutputFilterSeeWarning() throws Exception {
@@ -825,9 +814,7 @@ public class BuildViewTest extends BuildViewTestBase {
     assertThat(getGeneratingAction(getBinArtifact("A_deploy.jar", ct))).isNotNull();
   }
 
-  /**
-   * Regression test: ClassCastException in SkyframeLabelVisitor.updateRootCauses.
-   */
+  /** Regression test for b/14248208. */
   @Test
   public void testDepOnGoodTargetInBadPkgAndTransitivelyBadTarget() throws Exception {
     reporter.removeHandler(failFastHandler);
@@ -1085,7 +1072,7 @@ public class BuildViewTest extends BuildViewTestBase {
     reporter.removeHandler(failFastHandler); // Expect errors from action conflicts.
     scratch.file(
         "conflict/BUILD",
-        "config_setting(name = 'a', values = {'test_arg': 'a'})",
+        "config_setting(name = 'a', values = {'cpu': 'unobtainiumx'})",
         "cc_library(name='x', srcs=select({':a': ['a.cc'], '//conditions:default': ['foo.cc']}))",
         "cc_binary(name='_objs/x/foo.o', srcs=['bar.cc'])");
     AnalysisResult result =

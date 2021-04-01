@@ -27,8 +27,8 @@ import com.google.devtools.build.lib.query2.engine.QueryEnvironment.ThreadSafeMu
 import java.util.List;
 
 /**
- * A somepath(x, y) query expression, which computes the set of nodes
- * on some arbitrary path from a target in set x to a target in set y.
+ * A somepath(x, y) query expression, which computes the set of nodes on some arbitrary path from a
+ * target in set x to a target in set y.
  *
  * <pre>expr ::= SOMEPATH '(' expr ',' expr ')'</pre>
  */
@@ -71,9 +71,6 @@ class SomePathFunction implements QueryFunction {
             public Void call() throws QueryException, InterruptedException {
               ThreadSafeMutableSet<T> fromValue = fromValueFuture.getIfSuccessful();
               ThreadSafeMutableSet<T> toValue = toValueFuture.getIfSuccessful();
-
-              env.buildTransitiveClosure(expression, fromValue, Integer.MAX_VALUE);
-
               ((CustomFunctionQueryEnvironment<T>) env)
                   .somePath(fromValue, toValue, expression, callback);
               return null;

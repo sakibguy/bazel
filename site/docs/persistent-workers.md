@@ -1,27 +1,44 @@
 ---
 layout: documentation
-title: Persistent workers
+title: Persistent Workers
+category: extending
 ---
 
-# Persistent workers
+# Persistent Workers
 
-_Persistent workers_ (often called _workers_ for short) is an
+This page covers how to use persistent workers, the benefits, requirements,
+and how workers affect sandboxing.
+
+A persistent worker is a long-running process started by the Bazel server, which
+functions as a _wrapper_ around the actual _tool_ (typically a compiler), or is
+the _tool_ itself. In order to benefit from persistent workers, the tool must
+support doing a sequence of compilations, and the wrapper needs to translate
+between the tool's API and the request/response format described below. The same
+worker might be called with and without the `--persistent_worker` flag
+in the same build, and is responsible for appropriately starting and talking to
+the tool, as well as shutting down workers on exit. Each worker instance is
+assigned (but not chrooted to) a separate working directory under
+`<outputBase>/bazel-workers`.
+
+Using persistent workers is an
 [execution strategy](https://docs.bazel.build/versions/master/user-manual.html#strategy-options)
 that decreases start-up overhead, allows more JIT compilation, and enables
 caching of for example the abstract syntax trees in the action execution. This
 strategy achieves these improvements by sending multiple requests to a
-long-running process. Persistent workers are available for
-[Java (built-in)](https://cs.opensource.google/bazel/bazel/+/master:src/java_tools/buildjar/java/com/google/devtools/build/buildjar/BazelJavaBuilder.java),
+long-running process.
+
+Persistent workers are implemented for multiple languages, including Java,
 [TypeScript](https://bazelbuild.github.io/rules_nodejs/TypeScript.html),
-[Scala](https://github.com/bazelbuild/rules_scala), and more.
+[Scala](https://github.com/bazelbuild/rules_scala),
+[Kotlin](https://github.com/bazelbuild/rules_kotlin), and more.
 
 ## Using persistent workers <a name="usage"></a>
 
 [Bazel 0.27 and higher](https://blog.bazel.build/2019/06/19/list-strategy.html)
-by default uses persistent workers when executing builds, though remote
+uses persistent workers by default when executing builds, though remote
 execution takes precedence. For actions that do not support persistent workers,
-Bazel falls back to regular workers instead. You can explicitly set your build
-to use persistent workers by setting the `worker`
+Bazel falls back to starting a tool instance for each action. You can explicitly
+set your build to use persistent workers by setting the `worker`
 [strategy](user-manual.html#strategy-options) for the applicable tool mnemonics.
 As a best practice, this example includes specifying `local` as a fallback to
 the `worker` strategy:
@@ -31,9 +48,9 @@ bazel build //my:target --strategy=Javac=worker,local
 ```
 
 Using the workers strategy instead of the local strategy can boost compilation
-speed significantly, depending on implementation. For Java, we typically see 2–4
-times faster builds, sometimes more for incremental compilation. Compiling Bazel
-is about 2.5 times as fast with workers. For more details, see the
+speed significantly, depending on implementation. For Java, builds can be
+2–4 times faster, sometimes more for incremental compilation. Compiling
+Bazel is about 2.5 times as fast with workers. For more details, see the
 "[Choosing number of workers](#number-of-workers)" section.
 
 If you also have a remote build environment that matches your local build
@@ -64,8 +81,8 @@ benefit of multiple worker instances is even smaller.
 
 This graph shows the from-scratch compilation times for Bazel (target
 `//src:bazel`) on a 6-core hyper-threaded Intel Xeon 3.5 GHz Linux workstation
-with 64 GB of RAM. For each worker configuration, we ran 5 clean builds and took
-the average of the last 4.
+with 64 GB of RAM. For each worker configuration, five clean builds are run and
+the average of the last four are taken.
 
 <p align="center">
 <img width="596px" alt="Graph of performance improvements of clean builds" src="/assets/workers-clean-chart.png">
@@ -90,8 +107,9 @@ discarded):
 <img width="592px" alt="Graph of performance improvements of incremental builds" src="/assets/workers-incremental-chart.png">
 </p>
 
-The speed-up depends on the change being made. We have measured a speed-up of a
-factor 6 in the above situation when a commonly used constant was changed.
+The speed-up depends on the change being made. A speed-up of a
+factor 6 is measured in the above situation when a commonly used constant
+is changed.
 
 ## Modifying persistent workers<a name="options"></a>
 
@@ -116,8 +134,8 @@ other workers are prevented from running. This flag can be used multiple times.
 Passing the
 [`--worker_sandboxing`](command-line-reference.html#flag--worker_sandboxing)
 flag makes each worker request use a separate sandbox directory for all its
-inputs. Setting up the sandbox takes some extra time, especially on MacOS, but
-gives a better correctness guarantee.
+inputs. Setting up the [sandbox](sandboxing.md) takes some extra time,
+especially on macOS, but gives a better correctness guarantee.
 
 You can use the `--experimental_worker_allow_json_protocol` flag to allow
 workers to communicate with Bazel through JSON instead of protocol buffers
@@ -143,76 +161,8 @@ For Android builds, see details at the
 
 ## Implementing persistent workers<a name="implementation"></a>
 
-Persistent workers are implemented for multiple languages, including Java,
-[TypeScript](https://bazelbuild.github.io/rules_nodejs/TypeScript.html),
-[Scala](https://github.com/bazelbuild/rules_scala),
-[Kotlin](https://github.com/bazelbuild/rules_kotlin), and more. You can
-implement persistent workers in other languages and for other tools, as well.
-
-Each worker is a long-running process started by the Bazel server, which
-functions as a _wrapper_ around the actual _tool_ (typically a compiler). In
-order to benefit from persistent workers, the tool must support doing a sequence
-of compilations, and the wrapper needs to translate between the tool's API and
-the request/response format described below. The wrapper must recognize the
-`--persistent_worker` command-line flag and only make itself persistent if that
-flag is passed, otherwise it must do a one-shot compilation and exit. The same
-worker program might be called with and without the `--persistent_worker` flag
-in the same build, and is responsible for appropriately spawning and talking to
-the tool, as well as shutting down workers on exit. Each worker instance is
-assigned (but not chrooted to) a separate working directory under
-`<outputBase>/bazel-workers`.
-
-The Bazel server communicates with the worker using stdin/stdout. It supports
-the use of protocol buffers or JSON strings. Support for JSON is experimental
-and thus subject to change. It is guarded behind the
-`--experimental_worker_allow_json_protocol` flag.
-
-When using protobuf, the compilation requests are sent as
-[`WorkerRequest`](https://github.com/bazelbuild/bazel/blob/master/src/main/protobuf/worker_protocol.proto)
-protocol buffers in standard binary format, and responses are similarly returned
-as
-[`WorkerResponse`](https://github.com/bazelbuild/bazel/blob/master/src/main/protobuf/worker_protocol.proto)
-protocol buffers. Each protocol buffer is preceded by its length in varint
-format (see
-[`MessageLite.writeDelimitedTo()`](https://developers.google.com/protocol-buffers/docs/reference/java/com/google/protobuf/MessageLite.html#writeDelimitedTo-java.io.OutputStream-).
-
-JSON requests uphold the same structure as the protobuf, but uses standard JSON.
-Bazel stores the requests as protobufs and converts them to JSON using
-[protobuf's JSON format](https://source.corp.google.com/piper///depot/google3/java/com/google/protobuf/util/JsonFormat.java)
-Responses are parsed by a JSON parser into the same structure as the
-WorkResponse protobuf, then converted to proto manually.
-JSON requests and responses are not preceded by a size indicator.
-
-The request's `args` field should contain a list of strings that describe
-the action to be done. The `inputs` field may contain input file names and their
-hash digests, allowing the caching of intermediate results without having to
-recompute the digest.
-
-<p class="warning">Because responses are sent on stdout, neither the worker nor the underlying tool should write other messages into that stream.</p>
-
-Writing other things to stdout crashes the worker. Any output that should be
-shown to the user can be put in the `output` field of the response, and output
-that should be logged should go to stderr. The wrapper should make sure that
-what the tool writes on stdout is appropriately redirected.
-
-To enable the `worker` strategy for an action, the `execution_requirements` for
-that action must include `{"supports-workers": "1"}`. It can also include a
-`requires-worker-protocol` requirement specifying whether Bazel should
-communicate with that worker using `json` or `proto`. This is required for JSON
-but is optional for proto since proto is the default. You can also add a
-`worker-key-mnemonic` to the `execution_requirements` section, allowing the
-mnemonic for workers to be separate from the mnemonic for the action. This can
-be useful when the same executable is used for several mnemonics, though it
-limits how much the user can control when to use workers.
-
-The action definition must also contain an `arguments` definition with a
-flag-file (`@`-preceded) argument at the end. Any non-flag-file arguments are
-_startup flags_ that will be passed to the worker on startup, allowing
-configuration common to all requests. The flag-file argument is used to read
-arguments for each request, including possible _non-startup flags_. To pass an
-argument starting with a literal `@`, start the argument with `@@` instead. If
-an argument is also an external repository label, it will not be considered a
-flag-file argument.
+See the [creating persistent workers](creating-workers.html) page for
+information on how to make a worker.
 
 This example shows a Starlark configuration for a worker that uses JSON:
 
@@ -244,12 +194,15 @@ inputs: [
 ]
 ```
 
-The worker receives this on stdin in JSON format (because
-"requires-worker-protocol" is set to JSON, and
+The worker receives this on `stdin` in JSON format (because
+`requires-worker-protocol` is set to JSON, and
 `--experimental_worker_allow_json_protocol` is passed to the build to enable
-this option). To communicate with the associated worker using binary-encoded
-protobuf instead of json, `requires-worker-protocol` would be set to `proto`,
-like this:
+this option). The worker then performs the action, and sends a JSON-formatted
+`WorkResponse` to Bazel on its stdout. Bazel then parses this response and
+manually converts it to a `WorkResponse` proto. To communicate
+with the associated worker using binary-encoded protobuf instead of JSON,
+`requires-worker-protocol` would be set to `proto`, like this:
+
 ```
   execution_requirements = {
     "supports-workers" : "1" ,
@@ -270,17 +223,20 @@ threads, if the underlying tool is multithreaded and the wrapper is set up to
 understand this.
 
 In [this GitHub repo](https://github.com/Ubehebe/bazel-worker-examples), you can
-see example worker wrappers written in Java as well as in Python.
+see example worker wrappers written in Java as well as in Python. If you are
+working in JavaScript or TypeScript, the [@bazel/worker
+package](https://www.npmjs.com/package/@bazel/worker) and
+[nodejs worker example](https://github.com/bazelbuild/rules_nodejs/tree/stable/examples/worker)
+might be helpful.
 
 ## How do workers affect sandboxing? <a name="sandboxing"></a>
 
-Using the `worker` strategy by default does not run the action in a sandbox,
-similar to the `local` strategy. You can set the `--worker_sandboxing` flag to
-run all workers inside sandboxes, making sure each execution of the tool only
-sees the input files it's supposed to have. The tool may still leak information
-between requests internally, for instance through a cache. Using `dynamic`
-strategy
-[requires workers to be sandboxed](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/exec/SpawnStrategyRegistry.java).
+Using the `worker` strategy by default does not run the action in a
+[sandbox](sandboxing.md), similar to the `local` strategy. You can set
+the `--worker_sandboxing` flag to run all workers inside sandboxes, making sure
+each execution of the tool only sees the input files it's supposed to have. The
+tool may still leak information between requests internally, for instance
+through a cache. Using `dynamic` strategy [requires workers to be sandboxed](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/exec/SpawnStrategyRegistry.java).
 
 To allow correct use of compiler caches with workers, a digest is passed along
 with each input file. Thus the compiler or the wrapper can check if the input is

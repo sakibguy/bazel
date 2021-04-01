@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
 import com.google.devtools.build.lib.actions.Artifact.TreeFileArtifact;
+import com.google.devtools.build.lib.actions.ArtifactRoot.RootType;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine;
 import com.google.devtools.build.lib.analysis.actions.CustomCommandLine.VectorArg;
@@ -56,7 +57,7 @@ public class CustomCommandLineTest {
   @Before
   public void createArtifacts() throws Exception  {
     Scratch scratch = new Scratch();
-    rootDir = ArtifactRoot.asDerivedRoot(scratch.dir("/exec/root"), "dir");
+    rootDir = ArtifactRoot.asDerivedRoot(scratch.dir("/exec/root"), RootType.Output, "dir");
     artifact1 = ActionsTestUtil.createArtifact(rootDir, scratch.file("/exec/root/dir/file1.txt"));
     artifact2 = ActionsTestUtil.createArtifact(rootDir, scratch.file("/exec/root/dir/file2.txt"));
   }
@@ -820,7 +821,7 @@ public class CustomCommandLineTest {
   }
 
   @Test
-  public void testCombinedArgs() {
+  public void testCombinedArgs() throws Exception {
     CustomCommandLine cl =
         builder()
             .add("--arg")
@@ -889,7 +890,7 @@ public class CustomCommandLineTest {
   }
 
   @Test
-  public void testTreeFileArtifactExecPathArgs() {
+  public void testTreeFileArtifactExecPathArgs() throws Exception {
     SpecialArtifact treeArtifactOne = createTreeArtifact("myArtifact/treeArtifact1");
     SpecialArtifact treeArtifactTwo = createTreeArtifact("myArtifact/treeArtifact2");
 
@@ -948,7 +949,7 @@ public class CustomCommandLineTest {
   }
 
   @Test
-  public void testKeyComputation() {
+  public void testKeyComputation() throws Exception {
     NestedSet<String> values = NestedSetBuilder.<String>stableOrder().add("a").add("b").build();
     ImmutableList<CustomCommandLine> commandLines =
         ImmutableList.<CustomCommandLine>builder()

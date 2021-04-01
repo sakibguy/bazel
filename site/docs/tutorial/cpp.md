@@ -1,11 +1,12 @@
 ---
 layout: documentation
 title: Build Tutorial - C++
+category: getting-started
 ---
 
-# Introduction to Bazel: Building a C++ Project
+# Bazel Tutorial: Build a C++ Project
 
-In this tutorial, you'll learn the basics of building C++ applications with
+This tutorial covers the basics of building C++ applications with
 Bazel. You will set up your workspace and build a simple C++ project that
 illustrates key Bazel concepts, such as targets and `BUILD` files. After
 completing this tutorial, take a look at
@@ -16,20 +17,13 @@ Estimated completion time: 30 minutes.
 
 ## What you'll learn
 
-In this tutorial you'll learn how to:
+In this tutorial you learn how to:
 
 *  Build a target
 *  Visualize the project's dependencies
 *  Split the project into multiple targets and packages
 *  Control target visibility across packages
 *  Reference targets through labels
-
-## Contents
-{:.no_toc}
-
-* ToC
-{:toc}
-
 
 ## Before you begin
 
@@ -131,16 +125,16 @@ source file(s) from which Bazel builds the target.
 
 ### Build the project
 
-Let's build your sample project. Change into the `cpp-tutorial/stage1` directory
-and run the following command:
+To build your sample project, navigate to the `cpp-tutorial/stage1` directory
+and run:
 
 ```
 bazel build //main:hello-world
 ```
 
-Notice the target label - the `//main:` part is the location of our `BUILD`
-file relative to the root of the workspace, and `hello-world` is what we named
-that target in the `BUILD` file. (You will learn about target labels in more
+In the target label, the `//main:` part is the location of the `BUILD`
+file relative to the root of the workspace, and `hello-world` is the target
+name in the `BUILD` file. (You will learn about target labels in more
 detail at the end of this tutorial.)
 
 Bazel produces output similar to the following:
@@ -168,8 +162,9 @@ A successful build has all of its dependencies explicitly stated in the `BUILD`
 file. Bazel uses those statements to create the project's dependency graph,
 which enables accurate incremental builds.
 
-Let's visualize our sample project's dependencies. First, generate a text
-representation of the dependency graph (run the command at the workspace root):
+To visualize the sample project's dependencies, you can generate a text
+representation of the dependency graph by running this command at the
+workspace root:
 
 ```
 bazel query --notool_deps --noimplicit_deps "deps(//main:hello-world)" \
@@ -202,8 +197,8 @@ that builds a single source file with no additional dependencies:
 
 ![Dependency graph for 'hello-world'](/assets/cpp-tutorial-stage1.png)
 
-Now that you have set up your workspace, built your project, and examined its
-dependencies, let's add some complexity.
+After you set up your workspace, build your project, and examine its
+dependencies, then you can add some complexity.
 
 ## Refine your Bazel build
 
@@ -214,7 +209,7 @@ building multiple parts of a project at once.
 
 ### Specify multiple build targets
 
-Let's split our sample project build into two targets. Take a look at the
+You can split the sample project build into two targets. Take a look at the
 `BUILD` file in the `cpp-tutorial/stage2/main` directory:
 
 ```python
@@ -239,7 +234,7 @@ then the `hello-world` binary. The `deps` attribute in the `hello-world` target
 tells Bazel that the `hello-greet` library is required to build the `hello-world`
 binary.
 
-Let's build this new version of our project. Change into the
+Next, build this new version of the project. Change into the
 `cpp-tutorial/stage2` directory and run the following command:
 
 ```
@@ -275,7 +270,7 @@ builds two additional source files.
 
 ### Use multiple packages
 
-Let's now split the project into multiple packages. Take a look at the contents
+You can split the project into multiple packages. Take a look at the contents
 of the `cpp-tutorial/stage3` directory:
 
 ```
@@ -291,8 +286,9 @@ of the `cpp-tutorial/stage3` directory:
    │   └── hello-time.h
    └── WORKSPACE
 ```
-Notice that we now have two sub-directories, and each contains a `BUILD` file.
-Therefore, to Bazel, the workspace now contains two packages, `lib` and `main`.
+Notice that now there are two sub-directories, and each contains a `BUILD`
+file. Therefore, to Bazel, the workspace now contains two packages,
+`lib` and `main`.
 
 Take a look at the `lib/BUILD` file:
 
@@ -331,13 +327,13 @@ at the dependency graph:
 
 ![Dependency graph for 'hello-world'](/assets/cpp-tutorial-stage3.png)
 
-Notice that for the build to succeed, we make the `//lib:hello-time` target in
+Notice that for the build to succeed, you make the `//lib:hello-time` target in
 `lib/BUILD` explicitly visible to targets in `main/BUILD` using the `visibility`
 attribute. This is because by default targets are only visible to other targets
 in the same `BUILD` file. (Bazel uses target visibility to prevent issues such
 as libraries containing implementation details leaking into public APIs.)
 
-Let's build this final version of our project. Change into the
+Next you can build this final version of the project. Change into the
 `cpp-tutorial/stage3` directory and run the following command:
 
 ```
@@ -388,7 +384,8 @@ file, you can even skip the `//` workspace root identifier and just use
 
 Congratulations! You now know the basics of building a C++ project with Bazel.
 Next, read up on the most common [C++ build use cases](../cpp-use-cases.md).
-Then, check out the following:
+
+For more details, see:
 
 *  [External Dependencies](../external.html) to learn more about working with
    local and remote repositories.

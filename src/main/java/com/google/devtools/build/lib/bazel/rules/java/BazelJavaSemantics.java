@@ -21,7 +21,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.Streams;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.analysis.AnalysisUtils;
 import com.google.devtools.build.lib.analysis.RuleConfiguredTargetBuilder;
@@ -57,7 +56,6 @@ import com.google.devtools.build.lib.rules.java.JavaCompilationHelper;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.OneVersionEnforcementLevel;
 import com.google.devtools.build.lib.rules.java.JavaHelper;
-import com.google.devtools.build.lib.rules.java.JavaInfo;
 import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider;
 import com.google.devtools.build.lib.rules.java.JavaSemantics;
 import com.google.devtools.build.lib.rules.java.JavaSourceJarsProvider;
@@ -436,7 +434,7 @@ public class BazelJavaSemantics implements JavaSemantics {
             .addJoinedValues(
                 "classpath",
                 ";",
-                Iterables.transform(classpath.toList(), Artifact.OUTPUT_DIR_RELATIVE_PATH_STRING))
+                Iterables.transform(classpath.toList(), Artifact.RUNFILES_PATH_STRING))
             // TODO(laszlocsomor): Change the Launcher to accept multiple jvm_flags entries. As of
             // 2019-02-13 the Launcher accepts just one jvm_flags entry, which contains all the
             // flags, joined by TAB characters. The Launcher splits up the string to get the
@@ -520,7 +518,7 @@ public class BazelJavaSemantics implements JavaSemantics {
         ImmutableList.<CcInfo>builder()
             .addAll(AnalysisUtils.getProviders(deps, CcInfo.PROVIDER))
             .addAll(
-                Streams.stream(AnalysisUtils.getProviders(deps, JavaCcLinkParamsProvider.PROVIDER))
+                AnalysisUtils.getProviders(deps, JavaCcLinkParamsProvider.PROVIDER).stream()
                     .map(JavaCcLinkParamsProvider::getCcInfo)
                     .collect(ImmutableList.toImmutableList()))
             .build();
@@ -611,23 +609,7 @@ public class BazelJavaSemantics implements JavaSemantics {
   public String addCoverageSupport(JavaCompilationHelper helper, Artifact executable) {
     // This method can be called only for *_binary/*_test targets.
     Preconditions.checkNotNull(executable);
-    if (!helper.addCoverageSupport()) {
-      // Fallback to $jacocorunner attribute if no jacocorunner was found in the toolchain.
-
-      // Add the coverage runner to the list of dependencies when compiling in coverage mode.
-      TransitiveInfoCollection runnerTarget =
-          helper.getRuleContext().getPrerequisite("$jacocorunner");
-      if (JavaInfo.getProvider(JavaCompilationArgsProvider.class, runnerTarget) != null) {
-        helper.addLibrariesToAttributes(ImmutableList.of(runnerTarget));
-      } else {
-        helper
-            .getRuleContext()
-            .ruleError(
-                "this rule depends on "
-                    + helper.getRuleContext().attributes().get("$jacocorunner", BuildType.LABEL)
-                    + " which is not a java_library rule, or contains errors");
-      }
-    }
+    helper.addCoverageSupport();
 
     // We do not add the instrumented jar to the runtime classpath, but provide it in the shell
     // script via an environment variable.
@@ -666,8 +648,7 @@ public class BazelJavaSemantics implements JavaSemantics {
   }
 
   @Override
-  public ImmutableList<Artifact> translate(RuleContext ruleContext, JavaConfiguration javaConfig,
-      List<Artifact> messages) {
+  public ImmutableList<Artifact> translate(RuleContext ruleContext, List<Artifact> messages) {
     return ImmutableList.<Artifact>of();
   }
 
@@ -695,7 +676,7 @@ public class BazelJavaSemantics implements JavaSemantics {
   @Override
   public PathFragment getDefaultJavaResourcePath(PathFragment path) {
     // Look for src/.../resources to match Maven repository structure.
-    List<String> segments = path.getSegments();
+    List<String> segments = path.splitToListOfSegments();
     for (int i = 0; i < segments.size() - 2; ++i) {
       if (segments.get(i).equals("src") && segments.get(i + 2).equals("resources")) {
         return path.subFragment(i + 3);
@@ -759,12 +740,5 @@ public class BazelJavaSemantics implements JavaSemantics {
 
   @Override
   public void checkDependencyRuleKinds(RuleContext ruleContext) {}
-
-  @Override
-  public boolean shouldSetupJavaBuilderTemporaryDirectories() {
-    // TODO(cushon): remove after release of:
-    // https://github.com/bazelbuild/bazel/commit/2350239c39841a67162c1c3de042397d6c3771e4
-    return true;
-  }
 }
 

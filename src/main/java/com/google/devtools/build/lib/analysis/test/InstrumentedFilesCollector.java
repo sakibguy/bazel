@@ -74,8 +74,7 @@ public final class InstrumentedFilesCollector {
     return instrumentedFilesInfoBuilder.build();
   }
 
-  public static InstrumentedFilesInfo collectTransitive(
-      RuleContext ruleContext, InstrumentationSpec spec) {
+  public static InstrumentedFilesInfo collect(RuleContext ruleContext, InstrumentationSpec spec) {
     return collect(
         ruleContext,
         spec,
@@ -85,7 +84,7 @@ public final class InstrumentedFilesCollector {
             Order.STABLE_ORDER));
   }
 
-  public static InstrumentedFilesInfo collectTransitive(
+  public static InstrumentedFilesInfo collect(
       RuleContext ruleContext,
       InstrumentationSpec spec,
       NestedSet<Pair<String, String>> reportedToActualSources) {
@@ -167,6 +166,28 @@ public final class InstrumentedFilesCollector {
       NestedSet<Pair<String, String>> coverageEnvironment,
       boolean withBaselineCoverage,
       NestedSet<Pair<String, String>> reportedToActualSources) {
+    return collect(
+        ruleContext,
+        spec,
+        localMetadataCollector,
+        rootFiles,
+        coverageSupportFiles,
+        coverageEnvironment,
+        withBaselineCoverage,
+        reportedToActualSources,
+        /* additionalMetadata= */ null);
+  }
+
+  public static InstrumentedFilesInfo collect(
+      RuleContext ruleContext,
+      InstrumentationSpec spec,
+      @Nullable LocalMetadataCollector localMetadataCollector,
+      @Nullable Iterable<Artifact> rootFiles,
+      NestedSet<Artifact> coverageSupportFiles,
+      NestedSet<Pair<String, String>> coverageEnvironment,
+      boolean withBaselineCoverage,
+      NestedSet<Pair<String, String>> reportedToActualSources,
+      @Nullable Iterable<Artifact> additionalMetadata) {
     Preconditions.checkNotNull(ruleContext);
     Preconditions.checkNotNull(spec);
 
@@ -211,6 +232,10 @@ public final class InstrumentedFilesCollector {
     // Local metadata files.
     if (localMetadataCollector != null) {
       instrumentedFilesInfoBuilder.collectLocalMetadata(localMetadataCollector, rootFiles);
+    }
+
+    if (additionalMetadata != null) {
+      instrumentedFilesInfoBuilder.addMetadataFiles(additionalMetadata);
     }
 
     return instrumentedFilesInfoBuilder.build();
@@ -392,6 +417,10 @@ public final class InstrumentedFilesCollector {
         LocalMetadataCollector localMetadataCollector, Iterable<Artifact> rootFiles) {
       localMetadataCollector.collectMetadataArtifacts(
           rootFiles, ruleContext.getAnalysisEnvironment(), metadataFilesBuilder);
+    }
+
+    void addMetadataFiles(Iterable<Artifact> files) {
+      metadataFilesBuilder.addAll(files);
     }
 
     InstrumentedFilesInfo build() {

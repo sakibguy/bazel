@@ -29,7 +29,6 @@ import com.google.devtools.build.lib.query2.engine.QueryUtil.AggregateAllOutputF
 import com.google.devtools.build.lib.query2.engine.ThreadSafeOutputFormatterCallback;
 import com.google.devtools.build.lib.query2.query.output.OutputFormatter;
 import com.google.devtools.build.lib.query2.query.output.QueryOptions;
-import com.google.devtools.build.lib.query2.query.output.QueryOptions.QueryFailureExitCodeBehavior;
 import com.google.devtools.build.lib.query2.query.output.QueryOutputUtils;
 import com.google.devtools.build.lib.query2.query.output.StreamedFormatter;
 import com.google.devtools.build.lib.runtime.BlazeCommandResult;
@@ -40,7 +39,6 @@ import com.google.devtools.build.lib.runtime.LoadingPhaseThreadsOption;
 import com.google.devtools.build.lib.runtime.QueryRuntimeHelper;
 import com.google.devtools.build.lib.server.FailureDetails;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
-import com.google.devtools.build.lib.server.FailureDetails.Interrupted;
 import com.google.devtools.build.lib.server.FailureDetails.Query;
 import com.google.devtools.build.lib.server.FailureDetails.Query.Code;
 import com.google.devtools.build.lib.util.DetailedExitCode;
@@ -107,6 +105,14 @@ public final class QueryCommand extends QueryEnvironmentBasedCommand {
 
     expr = queryEnv.transformParsedQuery(expr);
 
+    // This only applies to --order_output=auto. Instead of being written directly to the stream
+    // by the callback, this option aggregates the results in the lexicographically sorted
+    // aggregator first before using the StreamedFormatter to write it to stream later.
+    // An exception to this is when somepath is used at the top level of the query expression.
+    boolean lexicographicallySortOutput =
+        QueryOutputUtils.lexicographicallySortOutput(queryOptions, formatter)
+            && !expr.isTopLevelSomePathFunction();
+
     OutputStream out;
     if (formatter.canBeBuffered()) {
       // There is no particular reason for the 16384 constant here, except its a multiple of the
@@ -128,7 +134,11 @@ public final class QueryCommand extends QueryEnvironmentBasedCommand {
           queryOptions.aspectDeps.createResolver(env.getPackageManager(), env.getReporter()),
           hashFunction);
       streamedFormatter.setEventHandler(env.getReporter());
-      callback = streamedFormatter.createStreamCallback(out, queryOptions, queryEnv);
+      if (lexicographicallySortOutput) {
+        callback = QueryUtil.newLexicographicallySortedTargetAggregator();
+      } else {
+        callback = streamedFormatter.createStreamCallback(out, queryOptions, queryEnv);
+      }
     } else {
       callback = QueryUtil.newOrderedAggregateAllOutputFormatterCallback(queryEnv);
     }
@@ -146,12 +156,7 @@ public final class QueryCommand extends QueryEnvironmentBasedCommand {
             // TODO(bazel-team): this is a kludge to fix a bug observed in the wild. We should make
             // sure no null error messages ever get in.
             .handle(Event.error(e.getMessage() == null ? e.toString() : e.getMessage()));
-        if (QueryFailureExitCodeBehavior.UNDERLYING.equals(
-            queryOptions.queryFailureExitCodeBehavior)) {
-          return Either.ofLeft(BlazeCommandResult.failureDetail(e.getFailureDetail()));
-        } else {
-          return Either.ofLeft(finalizeBlazeCommandResult(ExitCode.ANALYSIS_FAILURE, e));
-        }
+        return Either.ofLeft(finalizeBlazeCommandResult(ExitCode.ANALYSIS_FAILURE, e));
       } catch (InterruptedException e) {
         catastrophe = false;
         IOException ioException = callback.getIoException();
@@ -167,7 +172,7 @@ public final class QueryCommand extends QueryEnvironmentBasedCommand {
           out.flush();
         }
       }
-      if (!streamResults) {
+      if (!streamResults || lexicographicallySortOutput) {
         disableAnsiCharactersFiltering(env);
         try (SilentCloseable closeable = Profiler.instance().profile("QueryOutputUtils.output")) {
           Set<Target> targets =
@@ -223,8 +228,7 @@ public final class QueryCommand extends QueryEnvironmentBasedCommand {
     String message = "query interrupted";
     env.getReporter().handle(Event.error(message));
     return Either.ofLeft(
-        BlazeCommandResult.detailedExitCode(
-            InterruptedFailureDetails.detailedExitCode(message, Interrupted.Code.QUERY)));
+        BlazeCommandResult.detailedExitCode(InterruptedFailureDetails.detailedExitCode(message)));
   }
 
   private static Either<BlazeCommandResult, QueryEvalResult> reportAndCreateIOExceptionResult(

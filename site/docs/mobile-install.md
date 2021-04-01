@@ -7,7 +7,11 @@ title: mobile-install
 
 <p class="lead">Fast iterative development for Android</p>
 
-## TL;DR
+This page describes how `bazel mobile-install` makes iterative development
+for Android much faster. It describes the benefits of this approach versus the
+challenges of the traditional app install method.
+
+## Summary
 
 To install small changes to an Android app very quickly, do the following:
 
@@ -54,14 +58,14 @@ Android internals, all without changing any of your app's code.
 
 ## Problems with traditional app installation
 
-We identified the following bottlenecks of building an Android app:
+Building an Android app has some issues, including:
 
 - Dexing. By default, "dx" is invoked exactly once in the build and it does not
 know how to reuse work from previous builds: it dexes every method again, even
 though only one method was changed.
 
 - Uploading data to the device. adb does not use the full bandwidth of a USB 2.0
-connection, and larger apps can take a lot of time to upload.  The entire app is
+connection, and larger apps can take a lot of time to upload. The entire app is
 uploaded, even if only small parts have changed, for example, a resource or a
 single method, so this can be a major bottleneck.
 
@@ -106,8 +110,8 @@ The first version of the sharding algorithm simply ordered the .class files
 alphabetically, then cut the list up into equal-sized parts, but this proved to
 be suboptimal: if a class was added or removed (even a nested or an anonymous
 one), it would cause all the classes alphabetically after it to shift by one,
-resulting in dexing those shards again. Thus, we settled upon sharding not
-individual classes, but Java packages instead. Of course, this still results in
+resulting in dexing those shards again. Thus, it was decided to shard Java
+packages rather than individual classes. Of course, this still results in
 dexing many shards if a new package is added or removed, but that is much less
 frequent than adding or removing a single class.
 
@@ -121,7 +125,7 @@ app. Generally speaking, the more shards, the faster the build and the
 installation will be, but the slower app startup becomes, because the dynamic
 linker has to do more work. The sweet spot is usually between 10 and 50 shards.
 
-### Incremental File Transfer
+### Incremental file transfer
 
 After building the app, the next step is to install it, preferably with the
 least effort possible. Installation consists of the following steps:
@@ -143,11 +147,11 @@ device. If the manifest is not present, it is assumed that every file needs to
 be uploaded.
 
 Note that it is possible to fool the incremental installation algorithm by
-changing a file on the device, but not its checksum in the manifest. We could
-have safeguarded against this by computing the checksum of the files on the
+changing a file on the device, but not its checksum in the manifest. This could
+have been safeguarded against by computing the checksum of the files on the
 device, but this was deemed to be not worth the increase in installation time.
 
-### The Stub Application
+### The Stub application
 
 The stub application is where the magic to load the dexes, native code and
 Android resources from the on-device `mobile-install` directory happens.
@@ -184,8 +188,9 @@ application within the Android framework.
 ### Performance
 
 In general, `bazel mobile-install` results in a 4x to 10x speedup of building
-and installing large apps after a small change. We computed the following
-numbers for a few Google products:
+and installing large apps after a small change.
+
+The following numbers were computed for a few Google products:
 
 <img src="/assets/mobile-install-performance.svg"/>
 
@@ -194,8 +199,8 @@ changing a base library takes more time.
 
 ### Limitations
 
-The tricks the stub application plays don't work in every case. We have
-identified the following cases where it does not work as expected:
+The tricks the stub application plays don't work in every case.
+The following cases highlight where it does not work as expected:
 
  - When `Context` is cast to the `Application` class in
    `ContentProvider#onCreate()`. This method is called during application

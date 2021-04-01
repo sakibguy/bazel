@@ -1,9 +1,13 @@
 ---
 layout: documentation
 title: Multiplex workers
+category: extending
 ---
 
-# Multiplex workers (experimental feature)
+# Multiplex Workers (Experimental Feature)
+
+This page describes multiplex workers, how to write multiplex-compatible
+rules, and workarounds for certain limitations.
 
 **Caution:** Experimental features are subject to change at any time.
 
@@ -15,16 +19,9 @@ the same worker process, which can then handle requests in parallel. For
 languages like Java and Scala, this saves JVM warm-up time and JIT compilation
 time.
 
-## Contents
-
-*  [Overview](#overview)
-*  [Writing multiplex-compatible rules](#writing-multiplex-compatible-rules)
-*  [Enabling multiplex workers](#enabling-multiplex-workers)
-   *  [WARNING](#warning)
-
 ## Overview
 
-We add two layers between the Bazel server and the worker process. For certain
+There are two layers between the Bazel server and the worker process. For certain
 mnemonics that can run processes in parallel, Bazel gets a `WorkerProxy` from
 the worker pool. The `WorkerProxy` forwards requests to the worker process
 sequentially along with a `request_id`, the worker process processes the request
@@ -66,7 +63,7 @@ necessary, and `supports-multiplex-workers` takes precedence over
 `supports-workers`, if both are set. A ruleset is encouraged to use multiplex
 workers if possible, to improve performance.
 
-### WARNING
+### Warning about rare bug
 
 Due to a rare bug, multiplex workers are currently unstable. Occasionally,
 Bazel hangs indefinitely at the execution phase. If you see this behavior,

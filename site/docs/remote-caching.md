@@ -3,7 +3,10 @@ layout: documentation
 title: Remote caching
 ---
 
-# Remote caching
+# Remote Caching
+
+This page covers remote caching, setting up a server to host the cache, and
+running builds using the remote cache.
 
 A remote cache is used by a team of developers and/or a continuous integration
 (CI) system to share build outputs. If your build is reproducible, the
@@ -176,7 +179,7 @@ syntax is `https://username:password@hostname.com:port/path`. Please note that
 HTTP Basic Authentication transmits username and password in plaintext over the
 network and it's thus critical to always use it with HTTPS.
 
-## HTTP Caching Protocol
+## HTTP caching protocol
 
 Bazel supports remote caching via HTTP/1.1. The protocol is conceptually simple:
 Binary data (BLOB) is uploaded via PUT requests and downloaded via GET requests.
@@ -306,9 +309,9 @@ checked in `.bazelrc` file.
 **Input file modification during a build**
 
 When an input file is modified during a build, Bazel might upload invalid
-results to the remote cache. We implemented a change detection that can be
-enabled via the `--experimental_guard_against_concurrent_changes` flag. There
-are no known issues and we expect to enable it by default in a future release.
+results to the remote cache. You can enable a change detection with
+the `--experimental_guard_against_concurrent_changes` flag. There
+are no known issues and it will be enabled by default in a future release.
 See [issue #3360] for updates. Generally, avoid modifying source files during a
 build.
 
@@ -339,7 +342,7 @@ On server side Bazel maintain in-memory state which speed up builds so when runn
 builds inside docker containers e.g. in CI, in-memory state is lost so Bazel
 must rebuild it before using remote cache.
 
-## External Links
+## External links
 
 * **Your Build in a Datacenter:** The Bazel team gave a [talk](https://fosdem.org/2018/schedule/event/datacenter_build/) about remote caching and execution at FOSDEM 2018.
 

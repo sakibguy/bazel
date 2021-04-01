@@ -294,7 +294,11 @@ public final class CcToolchainRule implements RuleDefinition {
         /* <!-- #BLAZE_RULE(cc_toolchain).ATTRIBUTE(module_map) -->
         Module map artifact to be used for modular builds.
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
-        .add(attr("module_map", LABEL).legacyAllowAnyFileType())
+        .add(
+            attr("module_map", LABEL)
+                .legacyAllowAnyFileType()
+                // Should be in the target configuration
+                .cfg(NoTransition.createFactory()))
         /* <!-- #BLAZE_RULE(cc_toolchain).ATTRIBUTE(supports_param_files) -->
         Set to True when cc_toolchain supports using param files for linking actions.
         <!-- #END_BLAZE_RULE.ATTRIBUTE -->*/
@@ -423,7 +427,7 @@ public final class CcToolchainRule implements RuleDefinition {
   public Metadata getMetadata() {
     return RuleDefinition.Metadata.builder()
         .name("cc_toolchain")
-        .ancestors(BaseRuleClasses.BaseRule.class)
+        .ancestors(BaseRuleClasses.NativeBuildRule.class)
         .factoryClass(CcToolchain.class)
         .build();
   }

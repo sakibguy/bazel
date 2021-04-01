@@ -1,16 +1,27 @@
 ---
 layout: documentation
 title: Build Tutorial - iOS
+category: getting-started
 ---
 
-# Introduction to Bazel: Building an iOS App
+# Bazel Tutorial: Build an iOS App
 
-In this tutorial, you will learn how to build a simple iOS app. You'll do the
-following:
+This tutorial covers how to build a simple iOS app using Bazel.
 
-* ToC
-{:toc}
+## What you'll learn
 
+In this tutorial, you learn how to:
+
+*   Set up the environment by installing Bazel and Xcode, and downloading the
+    sample project
+*   Set up a Bazel [workspace](workspace.md) that contained the source code
+    for the app and a `WORKSPACE` file that identifies the top level of the
+    workspace directory
+*   Update the `WORKSPACE` file to contain references to the required
+    external dependencies
+*   Create a `BUILD` file
+*   Run Bazel to build the app for the simulator and an iOS device
+*   Run the app in the simulator and on an iOS device
 
 ## Set up your environment
 
@@ -160,8 +171,8 @@ following load statement to the beginning of your `BUILD` file:
 load("@build_bazel_rules_apple//apple:ios.bzl", "ios_application")
 ```
 
-We only need to load the `ios_application` rule because the `objc_library` rule
-is built into the Bazel package.
+You only need to load the `ios_application` rule because the `objc_library`
+rule is built into the Bazel package.
 
 ### Add an objc_library rule
 
@@ -235,6 +246,13 @@ iOS device.
 **NOTE:** The app launches standalone but requires a backend server in order to
 produce output. See the README file in the sample project directory to find out
 how to build the backend server.
+
+The built app is located in the `$WORKSPACE/bazel-bin` directory.
+
+Completed `WORKSPACE` and `BUILD` files for this tutorial are located in the
+[master branch](https://github.com/bazelbuild/examples/tree/master/tutorial)
+of the GitHub repo. You can compare your work to the completed files for
+additional help or troubleshooting.
 
 ### Build the app for the simulator
 
@@ -334,24 +352,9 @@ If your app fails to launch, make sure that your device is part of your
 provisioning profile. The `View Device Logs` button on the `Devices` screen in
 Xcode may provide other information as to what has gone wrong.
 
-## Review your work
+## Further reading
 
-In this tutorial, you used Bazel to build an iOS app. To accomplish that, you:
-
-*   Set up your environment by installing Bazel and Xcode, and downloading the
-    sample project
-*   Set up a Bazel [workspace](workspace.md) that contained the source code
-    for the app and a `WORKSPACE` file that identifies the top level of the
-    workspace directory
-*   Updated the `WORKSPACE` file to contain references to the required
-    external dependencies
-*   Created a `BUILD` file
-*   Ran Bazel to build the app for the simulator and an iOS device
-*   Ran the app in the simulator and on an iOS device
-
-The built app is located in the `$WORKSPACE/bazel-bin` directory.
-
-Completed `WORKSPACE` and `BUILD` files for this tutorial are located in the
+For more details, see
 [master branch](https://github.com/bazelbuild/examples/tree/master/tutorial)
-of the GitHub repo. You can compare your work to the completed files for
-additional help or troubleshooting.
+of the GitHub repo.
+

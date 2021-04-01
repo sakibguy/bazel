@@ -1,9 +1,13 @@
 ---
 layout: documentation
 title: Installing Bazel
+category: getting-started
 ---
 
 # Installing Bazel
+
+This page describes the various platforms supported by Bazel and links
+to the packages for more details.
 
 The Bazel team officially supports Bazel on these platforms:
 

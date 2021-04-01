@@ -19,6 +19,7 @@ import static java.lang.String.format;
 import static java.util.Collections.singletonMap;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
+import build.bazel.remote.execution.v2.Digest;
 import com.google.bytestream.ByteStreamGrpc;
 import com.google.bytestream.ByteStreamGrpc.ByteStreamFutureStub;
 import com.google.bytestream.ByteStreamProto.QueryWriteStatusRequest;
@@ -35,12 +36,12 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
 import com.google.devtools.build.lib.authandtls.CallCredentialsProvider;
 import com.google.devtools.build.lib.remote.RemoteRetrier.ProgressiveBackoff;
+import com.google.devtools.build.lib.remote.common.RemoteActionExecutionContext;
 import com.google.devtools.build.lib.remote.util.TracingMetadataUtils;
 import com.google.devtools.build.lib.remote.util.Utils;
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
-import io.grpc.Context;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.Status.Code;
@@ -64,10 +65,10 @@ import javax.annotation.concurrent.GuardedBy;
 /**
  * A client implementing the {@code Write} method of the {@code ByteStream} gRPC service.
  *
- * <p>The uploader supports reference counting to easily be shared between components with
- * different lifecyles. After instantiation the reference count is {@code 1}.
+ * <p>The uploader supports reference counting to easily be shared between components with different
+ * lifecyles. After instantiation the reference count is {@code 1}.
  *
- * See {@link ReferenceCounted} for more information on reference counting.
+ * <p>See {@link ReferenceCounted} for more information on reference counting.
  */
 class ByteStreamUploader extends AbstractReferenceCounted {
 
@@ -81,12 +82,12 @@ class ByteStreamUploader extends AbstractReferenceCounted {
 
   private final Object lock = new Object();
 
-  /** Contains the hash codes of already uploaded blobs. **/
+  /** Contains the hash codes of already uploaded blobs. * */
   @GuardedBy("lock")
   private final Set<HashCode> uploadedBlobs = new HashSet<>();
 
   @GuardedBy("lock")
-  private final Map<HashCode, ListenableFuture<Void>> uploadsInProgress = new HashMap<>();
+  private final Map<Digest, ListenableFuture<Void>> uploadsInProgress = new HashMap<>();
 
   @GuardedBy("lock")
   private boolean isShutdown;
@@ -133,9 +134,10 @@ class ByteStreamUploader extends AbstractReferenceCounted {
    *     uploaded, if {@code true} the blob is uploaded.
    * @throws IOException when reading of the {@link Chunker}s input source fails
    */
-  public void uploadBlob(HashCode hash, Chunker chunker, boolean forceUpload)
+  public void uploadBlob(
+      RemoteActionExecutionContext context, HashCode hash, Chunker chunker, boolean forceUpload)
       throws IOException, InterruptedException {
-    uploadBlobs(singletonMap(hash, chunker), forceUpload);
+    uploadBlobs(context, singletonMap(hash, chunker), forceUpload);
   }
 
   /**
@@ -155,12 +157,14 @@ class ByteStreamUploader extends AbstractReferenceCounted {
    *     uploaded, if {@code true} the blob is uploaded.
    * @throws IOException when reading of the {@link Chunker}s input source or uploading fails
    */
-  public void uploadBlobs(Map<HashCode, Chunker> chunkers, boolean forceUpload)
+  public void uploadBlobs(
+      RemoteActionExecutionContext context, Map<HashCode, Chunker> chunkers, boolean forceUpload)
       throws IOException, InterruptedException {
     List<ListenableFuture<Void>> uploads = new ArrayList<>();
 
     for (Map.Entry<HashCode, Chunker> chunkerEntry : chunkers.entrySet()) {
-      uploads.add(uploadBlobAsync(chunkerEntry.getKey(), chunkerEntry.getValue(), forceUpload));
+      uploads.add(
+          uploadBlobAsync(context, chunkerEntry.getKey(), chunkerEntry.getValue(), forceUpload));
     }
 
     try {
@@ -179,8 +183,8 @@ class ByteStreamUploader extends AbstractReferenceCounted {
    * Cancels all running uploads. The method returns immediately and does NOT wait for the uploads
    * to be cancelled.
    *
-   * <p>This method should not be called directly, but will be called implicitly when the
-   * reference count reaches {@code 0}.
+   * <p>This method should not be called directly, but will be called implicitly when the reference
+   * count reaches {@code 0}.
    */
   @VisibleForTesting
   void shutdown() {
@@ -200,6 +204,18 @@ class ByteStreamUploader extends AbstractReferenceCounted {
   }
 
   /**
+   * @deprecated Use {@link #uploadBlobAsync(RemoteActionExecutionContext, Digest, Chunker,
+   *     boolean)} instead.
+   */
+  @Deprecated
+  public ListenableFuture<Void> uploadBlobAsync(
+      RemoteActionExecutionContext context, HashCode hash, Chunker chunker, boolean forceUpload) {
+    Digest digest =
+        Digest.newBuilder().setHash(hash.toString()).setSizeBytes(chunker.getSize()).build();
+    return uploadBlobAsync(context, digest, chunker, forceUpload);
+  }
+
+  /**
    * Uploads a BLOB asynchronously to the remote {@code ByteStream} service. The call returns
    * immediately and one can listen to the returned future for the success/failure of the upload.
    *
@@ -209,32 +225,32 @@ class ByteStreamUploader extends AbstractReferenceCounted {
    * <p>Trying to upload the same BLOB multiple times concurrently, results in only one upload being
    * performed. This is transparent to the user of this API.
    *
-   * @param hash the hash of the data to upload.
+   * @param digest the {@link Digest} of the data to upload.
    * @param chunker the data to upload.
    * @param forceUpload if {@code false} the blob is not uploaded if it has previously been
    *     uploaded, if {@code true} the blob is uploaded.
    * @throws IOException when reading of the {@link Chunker}s input source fails
    */
   public ListenableFuture<Void> uploadBlobAsync(
-      HashCode hash, Chunker chunker, boolean forceUpload) {
+      RemoteActionExecutionContext context, Digest digest, Chunker chunker, boolean forceUpload) {
     synchronized (lock) {
       checkState(!isShutdown, "Must not call uploadBlobs after shutdown.");
 
-      if (!forceUpload && uploadedBlobs.contains(hash)) {
+      if (!forceUpload && uploadedBlobs.contains(HashCode.fromString(digest.getHash()))) {
         return Futures.immediateFuture(null);
       }
 
-      ListenableFuture<Void> inProgress = uploadsInProgress.get(hash);
+      ListenableFuture<Void> inProgress = uploadsInProgress.get(digest);
       if (inProgress != null) {
         return inProgress;
       }
 
       ListenableFuture<Void> uploadResult =
           Futures.transform(
-              startAsyncUpload(hash, chunker),
+              startAsyncUpload(context, digest, chunker),
               (v) -> {
                 synchronized (lock) {
-                  uploadedBlobs.add(hash);
+                  uploadedBlobs.add(HashCode.fromString(digest.getHash()));
                 }
                 return null;
               },
@@ -244,14 +260,20 @@ class ByteStreamUploader extends AbstractReferenceCounted {
           Futures.catchingAsync(
               uploadResult,
               StatusRuntimeException.class,
-              (sre) -> Futures.immediateFailedFuture(new IOException(sre)),
+              (sre) ->
+                  Futures.immediateFailedFuture(
+                      new IOException(
+                          String.format(
+                              "Error while uploading artifact with digest '%s/%s'",
+                              digest.getHash(), digest.getSizeBytes()),
+                          sre)),
               MoreExecutors.directExecutor());
 
-      uploadsInProgress.put(hash, uploadResult);
+      uploadsInProgress.put(digest, uploadResult);
       uploadResult.addListener(
           () -> {
             synchronized (lock) {
-              uploadsInProgress.remove(hash);
+              uploadsInProgress.remove(digest);
             }
           },
           MoreExecutors.directExecutor());
@@ -267,9 +289,9 @@ class ByteStreamUploader extends AbstractReferenceCounted {
     }
   }
 
-  private static String buildUploadResourceName(
-      String instanceName, UUID uuid, HashCode hash, long size) {
-    String resourceName = format("uploads/%s/blobs/%s/%d", uuid, hash, size);
+  private static String buildUploadResourceName(String instanceName, UUID uuid, Digest digest) {
+    String resourceName =
+        format("uploads/%s/blobs/%s/%d", uuid, digest.getHash(), digest.getSizeBytes());
     if (!Strings.isNullOrEmpty(instanceName)) {
       resourceName = instanceName + "/" + resourceName;
     }
@@ -277,18 +299,33 @@ class ByteStreamUploader extends AbstractReferenceCounted {
   }
 
   /** Starts a file upload and returns a future representing the upload. */
-  private ListenableFuture<Void> startAsyncUpload(HashCode hash, Chunker chunker) {
+  private ListenableFuture<Void> startAsyncUpload(
+      RemoteActionExecutionContext context, Digest digest, Chunker chunker) {
     try {
       chunker.reset();
     } catch (IOException e) {
       return Futures.immediateFailedFuture(e);
     }
 
+    if (chunker.getSize() != digest.getSizeBytes()) {
+      return Futures.immediateFailedFuture(
+          new IllegalStateException(
+              String.format(
+                  "Expected chunker size of %d, got %d",
+                  digest.getSizeBytes(), chunker.getSize())));
+    }
+
     UUID uploadId = UUID.randomUUID();
-    String resourceName = buildUploadResourceName(instanceName, uploadId, hash, chunker.getSize());
+    String resourceName = buildUploadResourceName(instanceName, uploadId, digest);
     AsyncUpload newUpload =
         new AsyncUpload(
-            channel, callCredentialsProvider, callTimeoutSecs, retrier, resourceName, chunker);
+            context,
+            channel,
+            callCredentialsProvider,
+            callTimeoutSecs,
+            retrier,
+            resourceName,
+            chunker);
     ListenableFuture<Void> currUpload = newUpload.start();
     currUpload.addListener(
         () -> {
@@ -323,6 +360,7 @@ class ByteStreamUploader extends AbstractReferenceCounted {
 
   private static class AsyncUpload {
 
+    private final RemoteActionExecutionContext context;
     private final Channel channel;
     private final CallCredentialsProvider callCredentialsProvider;
     private final long callTimeoutSecs;
@@ -333,12 +371,14 @@ class ByteStreamUploader extends AbstractReferenceCounted {
     private ClientCall<WriteRequest, WriteResponse> call;
 
     AsyncUpload(
+        RemoteActionExecutionContext context,
         Channel channel,
         CallCredentialsProvider callCredentialsProvider,
         long callTimeoutSecs,
         Retrier retrier,
         String resourceName,
         Chunker chunker) {
+      this.context = context;
       this.channel = channel;
       this.callCredentialsProvider = callCredentialsProvider;
       this.callTimeoutSecs = callTimeoutSecs;
@@ -348,7 +388,6 @@ class ByteStreamUploader extends AbstractReferenceCounted {
     }
 
     ListenableFuture<Void> start() {
-      Context ctx = Context.current();
       ProgressiveBackoff progressiveBackoff = new ProgressiveBackoff(retrier::newBackoff);
       AtomicLong committedOffset = new AtomicLong(0);
 
@@ -358,8 +397,7 @@ class ByteStreamUploader extends AbstractReferenceCounted {
                   retrier.executeAsync(
                       () -> {
                         if (committedOffset.get() < chunker.getSize()) {
-                          return ctx.call(
-                              () -> callAndQueryOnFailure(committedOffset, progressiveBackoff));
+                          return callAndQueryOnFailure(committedOffset, progressiveBackoff);
                         }
                         return Futures.immediateFuture(null);
                       },
@@ -384,7 +422,8 @@ class ByteStreamUploader extends AbstractReferenceCounted {
 
     private ByteStreamFutureStub bsFutureStub() {
       return ByteStreamGrpc.newFutureStub(channel)
-          .withInterceptors(TracingMetadataUtils.attachMetadataFromContextInterceptor())
+          .withInterceptors(
+              TracingMetadataUtils.attachMetadataInterceptor(context.getRequestMetadata()))
           .withCallCredentials(callCredentialsProvider.getCallCredentials())
           .withDeadlineAfter(callTimeoutSecs, SECONDS);
     }
@@ -395,7 +434,7 @@ class ByteStreamUploader extends AbstractReferenceCounted {
           call(committedOffset),
           Exception.class,
           (e) -> guardQueryWithSuppression(e, committedOffset, progressiveBackoff),
-          Context.current().fixedContextExecutor(MoreExecutors.directExecutor()));
+          MoreExecutors.directExecutor());
     }
 
     private ListenableFuture<Void> guardQueryWithSuppression(
@@ -559,7 +598,9 @@ class ByteStreamUploader extends AbstractReferenceCounted {
               }
             }
           };
-      call.start(callListener, TracingMetadataUtils.headersFromCurrentContext());
+      call.start(
+          callListener,
+          TracingMetadataUtils.headersFromRequestMetadata(context.getRequestMetadata()));
       call.request(1);
       return uploadResult;
     }

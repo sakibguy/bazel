@@ -1,13 +1,14 @@
 ---
 layout: documentation
 title: Macros
+category: extending
 ---
 
 # Macros
 
-<!-- [TOC] -->
 
-## Introduction
+This page covers the basics of using macros and includes typical use cases,
+debugging, and conventions.
 
 A macro is a function called from the BUILD file that can instantiate rules.
 Macros are mainly used for encapsulation and code reuse of existing rules
@@ -100,9 +101,9 @@ def chained_genrules(name, visibility=None):
   )
 ```
 
-Note that we only assigned the value of `visibility` to the second genrule.
-This enables macro authors hide outputs of intermediate rules from being
-depended upon by other targets in the workspace.
+The example only assigns a visibility value to the second genrule. This allows
+macro authors to hide the outputs of intermediate rules from being depended upon
+by other targets in the workspace.
 
 > Tip: Similar to `$@` for outputs, `$<` expands to the locations of files in
 the `srcs` attribute list.

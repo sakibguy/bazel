@@ -163,14 +163,12 @@ public class CppCompileActionBuilder {
       return CppActionNames.CPP_MODULE_COMPILE;
     } else if (CppFileTypes.CPP_HEADER.matches(sourcePath)) {
       // TODO(bazel-team): Handle C headers that probably don't work in C++ mode.
-      if (!cppConfiguration.getParseHeadersVerifiesModules()
-          && featureConfiguration.isEnabled(CppRuleClasses.PARSE_HEADERS)) {
+      if (featureConfiguration.isEnabled(CppRuleClasses.PARSE_HEADERS)) {
         return CppActionNames.CPP_HEADER_PARSING;
-      } else {
-        // CcCommon.collectCAndCppSources() ensures we do not add headers to
-        // the compilation artifacts unless 'parse_headers' is set.
-        throw new IllegalStateException();
       }
+      // CcCommon.collectCAndCppSources() ensures we do not add headers to
+      // the compilation artifacts unless 'parse_headers' is set.
+      throw new IllegalStateException();
     } else if (CppFileTypes.C_SOURCE.matches(sourcePath)) {
       return CppActionNames.C_COMPILE;
     } else if (CppFileTypes.CPP_SOURCE.matches(sourcePath)) {
@@ -344,13 +342,17 @@ public class CppCompileActionBuilder {
         .build();
   }
 
-  private boolean useHeaderModules() {
+  private boolean useHeaderModules(Artifact sourceFile) {
     Preconditions.checkNotNull(featureConfiguration);
     Preconditions.checkNotNull(sourceFile);
     return featureConfiguration.isEnabled(CppRuleClasses.USE_HEADER_MODULES)
         && (sourceFile.isFileType(CppFileTypes.CPP_SOURCE)
             || sourceFile.isFileType(CppFileTypes.CPP_HEADER)
             || sourceFile.isFileType(CppFileTypes.CPP_MODULE_MAP));
+  }
+
+  private boolean useHeaderModules() {
+    return useHeaderModules(sourceFile);
   }
 
   /**
@@ -426,6 +428,15 @@ public class CppCompileActionBuilder {
     return this;
   }
 
+  public boolean useDotdFile(Artifact sourceFile) {
+    return CppFileTypes.headerDiscoveryRequired(sourceFile) && !useHeaderModules(sourceFile);
+  }
+
+  public boolean dotdFilesEnabled() {
+    return cppSemantics.needsDotdInputPruning(configuration)
+        && !featureConfiguration.isEnabled(CppRuleClasses.PARSE_SHOWINCLUDES);
+  }
+
   public CppCompileActionBuilder setOutputs(Artifact outputFile, Artifact dotdFile) {
     this.outputFile = outputFile;
     this.dotdFile = dotdFile;
@@ -446,10 +457,7 @@ public class CppCompileActionBuilder {
             CppHelper.getArtifactNameForCategory(
                 ruleErrorConsumer, ccToolchain, outputCategory, outputName),
             configuration);
-    if (CppFileTypes.headerDiscoveryRequired(sourceFile)
-        && !useHeaderModules()
-        && cppSemantics.needsDotdInputPruning(configuration)
-        && !featureConfiguration.isEnabled(CppRuleClasses.PARSE_SHOWINCLUDES)) {
+    if (dotdFilesEnabled() && useDotdFile(sourceFile)) {
       String dotdFileName =
           CppHelper.getDotdFileName(ruleErrorConsumer, ccToolchain, outputCategory, outputName);
       dotdFile =

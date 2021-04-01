@@ -1,9 +1,12 @@
 ---
 layout: documentation
 title: Installing Bazel on openSUSE
+category: getting-started
 ---
 
 # Installing Bazel on openSUSE Tumbleweed & Leap
+
+This page describes how to install Bazel on openSUSE Tumbleweed and Leap.
 
 NOTE: The Bazel team does not officially maintain openSUSE support. For issues
 using Bazel on openSUSE please file a ticket at [bugzilla.opensuse.org](https://bugzilla.opensuse.org/).

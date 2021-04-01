@@ -18,7 +18,6 @@ import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionContext.ShowSubcommands;
 import com.google.devtools.build.lib.actions.LocalHostCapacity;
-import com.google.devtools.build.lib.actions.ResourceSet;
 import com.google.devtools.build.lib.analysis.config.PerLabelOptions;
 import com.google.devtools.build.lib.util.OptionsUtils;
 import com.google.devtools.build.lib.util.RegexFilter;
@@ -31,7 +30,6 @@ import com.google.devtools.common.options.EnumConverter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionDocumentationCategory;
 import com.google.devtools.common.options.OptionEffectTag;
-import com.google.devtools.common.options.OptionMetadataTag;
 import com.google.devtools.common.options.Options;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParsingException;
@@ -294,34 +292,6 @@ public class ExecutionOptions extends OptionsBase {
   public boolean useResourceAutoSense;
 
   @Option(
-      name = "local_resources",
-      defaultValue = "null",
-      documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
-      effectTags = {OptionEffectTag.UNKNOWN},
-      help =
-          "Deprecated by '--incompatible_remove_local_resources'. Please use "
-              + "'--local_ram_resources' and '--local_cpu_resources'",
-      deprecationWarning =
-          "--local_resources is deprecated. Please use"
-              + " --local_ram_resources and --local_cpu_resources instead.",
-      converter = ResourceSet.ResourceSetConverter.class)
-  public ResourceSet availableResources;
-
-  @Option(
-      name = "incompatible_remove_local_resources",
-      defaultValue = "true",
-      documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
-      effectTags = {OptionEffectTag.EXECUTION},
-      metadataTags = {
-        OptionMetadataTag.INCOMPATIBLE_CHANGE,
-        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
-      },
-      help =
-          "Deprecate local_resources in favor of --local_ram_resources and "
-              + "--local_cpu_resources.")
-  public boolean removeLocalResources;
-
-  @Option(
       name = "local_cpu_resources",
       defaultValue = "HOST_CPUS",
       documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
@@ -471,6 +441,40 @@ public class ExecutionOptions extends OptionsBase {
               + "Bazel uses a separate action to generate a dummy test.xml file containing the "
               + "test log. Otherwise, Bazel generates a test.xml as part of the test action.")
   public boolean splitXmlGeneration;
+
+  @Option(
+      name = "archived_tree_artifact_mnemonics_filter",
+      defaultValue = "-.*", // disabled by default
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS, OptionEffectTag.EXECUTION},
+      converter = RegexFilter.RegexFilterConverter.class,
+      help =
+          "Regex filter for mnemonics of actions for which we should create archived tree"
+              + " artifacts. This option is a no-op for actions which do not generate tree"
+              + " artifacts.")
+  public RegexFilter archivedArtifactsMnemonicsFilter;
+
+  @Option(
+      name = "experimental_send_archived_tree_artifact_inputs",
+      defaultValue = "null",
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS, OptionEffectTag.EXECUTION},
+      expansion = "--archived_tree_artifact_mnemonics_filter=.*",
+      help =
+          "Send input tree artifacts as a single archived file rather than sending each file in the"
+              + " artifact as a separate input.")
+  public Void ignoredEnableAllArchivedArtifacts;
+
+  @Option(
+      name = "noexperimental_send_archived_tree_artifact_inputs",
+      defaultValue = "null",
+      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS, OptionEffectTag.EXECUTION},
+      expansion = "--archived_tree_artifact_mnemonics_filter=-.*",
+      help =
+          "Send input tree artifacts as a single archived file rather than sending each file in the"
+              + " artifact as a separate input.")
+  public Void ignoredDisableAllArchivedArtifacts;
 
   /** An enum for specifying different formats of test output. */
   public enum TestOutputFormat {

@@ -266,6 +266,52 @@ EOF
   expect_log 'hello script!!! testing/t1'
 }
 
+function test_run_under_external_file_with_options() {
+  # Set up the external repo.
+  local run_repo=$TEST_TMPDIR/run
+  mkdir -p $run_repo || fail "mkdir run_repo failed"
+  touch $run_repo/WORKSPACE
+
+  cat <<EOF > $run_repo/BUILD
+exports_files(["under.sh"])
+EOF
+  cat <<EOF > $run_repo/under.sh
+#!/bin/sh
+echo running under @run//:under "\$*"
+EOF
+  chmod u+x $run_repo/under.sh
+
+
+  # Set up the main repo.
+  cat <<EOF > WORKSPACE
+local_repository(
+    name = "run",
+    path = "../run",
+)
+EOF
+
+  mkdir -p testing || fail "mkdir testing failed"
+
+  cat <<EOF > testing/BUILD
+sh_test(
+  name = "passing_test" ,
+  srcs = [ "passing_test.sh" ])
+EOF
+  cat <<EOF > testing/passing_test.sh
+#!/bin/sh
+exit 0
+EOF
+  chmod u+x testing/passing_test.sh
+
+
+  bazel test //testing:passing_test -s --run_under='@run//:under.sh -c' \
+    --test_output=all >& $TEST_log || fail "Expected success"
+
+  expect_log 'running under @run//:under -c testing/passing_test'
+  expect_log 'passing_test *PASSED'
+  expect_log '1 test passes.$'
+}
+
 function test_test_timeout() {
   mkdir -p dir
 
@@ -778,6 +824,50 @@ sh_test(
 EOF
   bazel test --nobuild_runfile_manifests //dir:test >& $TEST_log && fail "should have failed"
   expect_log "cannot run local tests with --nobuild_runfile_manifests"
+}
+
+function test_run_from_external_repo_sibling_repository_layout() {
+  cat <<EOF > WORKSPACE
+local_repository(
+    name = "a",
+    path = "./a",
+)
+EOF
+
+  mkdir -p a
+  touch a/WORKSPACE
+  cat <<'EOF' > a/BUILD
+py_test(
+    name = 'x',
+    srcs = ['x.py'],
+)
+EOF
+  touch a/x.py
+
+  bazel test --experimental_sibling_repository_layout @a//:x &> $TEST_log \
+      || fail "expected success"
+
+  cp $(testlogs_dir a)/x/test.xml $TEST_log
+  expect_log "<testsuite name=\"a/x\""
+  expect_log "<testcase name=\"a/x\""
+}
+
+function test_xml_output_format() {
+  touch WORKSPACE
+  cat <<'EOF' > BUILD
+py_test(
+    name = 'x',
+    srcs = ['x.py'],
+)
+EOF
+  touch x.py
+
+  bazel test //:x &> $TEST_log \
+      || fail "expected success"
+
+  cat bazel-testlogs/x/test.xml > $TEST_log
+  expect_log "<testsuite name=\"x\""
+  expect_log "<testcase name=\"x\""
 }
 
 run_suite "bazel test tests"

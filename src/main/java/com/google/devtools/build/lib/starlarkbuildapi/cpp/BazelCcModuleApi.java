@@ -23,6 +23,7 @@ import net.starlark.java.annot.Param;
 import net.starlark.java.annot.ParamType;
 import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.annot.StarlarkMethod;
+import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.NoneType;
 import net.starlark.java.eval.Sequence;
@@ -37,24 +38,30 @@ import net.starlark.java.eval.Tuple;
 public interface BazelCcModuleApi<
         StarlarkActionFactoryT extends StarlarkActionFactoryApi,
         FileT extends FileApi,
+        FdoContextT extends FdoContextApi<?>,
         ConstraintValueT extends ConstraintValueInfoApi,
         StarlarkRuleContextT extends StarlarkRuleContextApi<ConstraintValueT>,
-        CcToolchainProviderT extends CcToolchainProviderApi<FeatureConfigurationT>,
+        CcToolchainProviderT extends CcToolchainProviderApi<FeatureConfigurationT, ?, FdoContextT>,
         FeatureConfigurationT extends FeatureConfigurationApi,
         CompilationContextT extends CcCompilationContextApi<FileT>,
         CompilationOutputsT extends CcCompilationOutputsApi<FileT>,
-        LinkingOutputsT extends CcLinkingOutputsApi<FileT>,
-        LinkerInputT extends LinkerInputApi<LibraryToLinkT, FileT>,
-        LibraryToLinkT extends LibraryToLinkApi<FileT>,
+        LinkingOutputsT extends CcLinkingOutputsApi<FileT, LtoBackendArtifactsT>,
+        LtoBackendArtifactsT extends LtoBackendArtifactsApi<FileT>,
+        LinkerInputT extends LinkerInputApi<LibraryToLinkT, LtoBackendArtifactsT, FileT>,
+        LibraryToLinkT extends LibraryToLinkApi<FileT, LtoBackendArtifactsT>,
         LinkingContextT extends CcLinkingContextApi<FileT>,
         CcToolchainVariablesT extends CcToolchainVariablesApi,
-        CcToolchainConfigInfoT extends CcToolchainConfigInfoApi>
+        CcToolchainConfigInfoT extends CcToolchainConfigInfoApi,
+        DebugContextT extends CcDebugInfoContextApi,
+        CppModuleMapT extends CppModuleMapApi<FileT>>
     extends CcModuleApi<
         StarlarkActionFactoryT,
         FileT,
+        FdoContextT,
         CcToolchainProviderT,
         FeatureConfigurationT,
         CompilationContextT,
+        LtoBackendArtifactsT,
         LinkerInputT,
         LinkingContextT,
         LibraryToLinkT,
@@ -62,7 +69,9 @@ public interface BazelCcModuleApi<
         ConstraintValueT,
         StarlarkRuleContextT,
         CcToolchainConfigInfoT,
-        CompilationOutputsT> {
+        CompilationOutputsT,
+        DebugContextT,
+        CppModuleMapT> {
 
   @StarlarkMethod(
       name = "compile",
@@ -73,7 +82,6 @@ public interface BazelCcModuleApi<
       parameters = {
         @Param(
             name = "actions",
-            type = StarlarkActionFactoryApi.class,
             positional = false,
             named = true,
             doc = "<code>actions</code> object."),
@@ -81,21 +89,18 @@ public interface BazelCcModuleApi<
             name = "feature_configuration",
             doc = "<code>feature_configuration</code> to be queried.",
             positional = false,
-            named = true,
-            type = FeatureConfigurationApi.class),
+            named = true),
         @Param(
             name = "cc_toolchain",
             doc = "<code>CcToolchainInfo</code> provider to be used.",
             positional = false,
-            named = true,
-            type = CcToolchainProviderApi.class),
+            named = true),
         @Param(
             name = "srcs",
             doc = "The list of source files to be compiled.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "public_hdrs",
             doc =
@@ -103,8 +108,7 @@ public interface BazelCcModuleApi<
                     + "rules transitively.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "private_hdrs",
             doc =
@@ -112,8 +116,24 @@ public interface BazelCcModuleApi<
                     + " dependent rules.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
+        @Param(
+            name = "textual_hdrs",
+            positional = false,
+            named = true,
+            allowedTypes = {
+              @ParamType(type = Sequence.class, generic1 = FileApi.class),
+              @ParamType(type = Depset.class)
+            },
+            documented = false,
+            defaultValue = "[]"),
+        @Param(
+            name = "additional_exported_hdrs",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
+            defaultValue = "unbound"),
         @Param(
             name = "includes",
             doc =
@@ -121,8 +141,7 @@ public interface BazelCcModuleApi<
                     + "Usually passed with -I. Propagated to dependents transitively.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "quote_includes",
             doc =
@@ -132,8 +151,7 @@ public interface BazelCcModuleApi<
                     + "transitively.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "system_includes",
             doc =
@@ -143,8 +161,7 @@ public interface BazelCcModuleApi<
                     + "transitively.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "framework_includes",
             doc =
@@ -153,8 +170,7 @@ public interface BazelCcModuleApi<
                     + "dependents transitively.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "defines",
             doc =
@@ -162,8 +178,7 @@ public interface BazelCcModuleApi<
                     + " to dependents transitively.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "local_defines",
             doc =
@@ -171,8 +186,7 @@ public interface BazelCcModuleApi<
                     + " propagated to dependents transitively.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "include_prefix",
             doc =
@@ -183,8 +197,7 @@ public interface BazelCcModuleApi<
                     + "prefix is added.",
             positional = false,
             named = true,
-            defaultValue = "''",
-            type = String.class),
+            defaultValue = "''"),
         @Param(
             name = "strip_include_prefix",
             doc =
@@ -196,59 +209,113 @@ public interface BazelCcModuleApi<
                     + " added after this prefix is stripped.",
             positional = false,
             named = true,
-            defaultValue = "''",
-            type = String.class),
+            defaultValue = "''"),
         @Param(
             name = "user_compile_flags",
             doc = "Additional list of compilation options.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "compilation_contexts",
             doc = "Headers from dependencies used for compilation.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "name",
             doc =
                 "This is used for naming the output artifacts of actions created by this "
                     + "method.",
             positional = false,
-            named = true,
-            type = String.class),
+            named = true),
         @Param(
             name = "disallow_pic_outputs",
             doc = "Whether PIC outputs should be created.",
             positional = false,
             named = true,
-            defaultValue = "False",
-            type = Boolean.class),
+            defaultValue = "False"),
         @Param(
             name = "disallow_nopic_outputs",
             doc = "Whether NOPIC outputs should be created.",
             positional = false,
             named = true,
-            defaultValue = "False",
-            type = Boolean.class),
+            defaultValue = "False"),
         @Param(
             name = "additional_inputs",
             doc = "List of additional files needed for compilation of srcs",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
+        @Param(
+            name = "module_map",
+            positional = false,
+            documented = false,
+            defaultValue = "unbound",
+            allowedTypes = {
+              @ParamType(type = CppModuleMapApi.class),
+              @ParamType(type = NoneType.class)
+            },
+            named = true),
+        @Param(
+            name = "additional_module_maps",
+            positional = false,
+            documented = false,
+            defaultValue = "unbound",
+            allowedTypes = {@ParamType(type = Sequence.class, generic1 = CppModuleMapApi.class)},
+            named = true),
+        @Param(
+            name = "propagate_module_map_to_compile_action",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Boolean.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "do_not_generate_module_map",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Boolean.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "code_coverage_enabled",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Boolean.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "hdrs_checking_mode",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = String.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "variables_extension",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Dict.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "language",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = String.class)},
+            defaultValue = "unbound"),
       })
-  Tuple<Object> compile(
+  Tuple compile(
       StarlarkActionFactoryT starlarkActionFactoryApi,
       FeatureConfigurationT starlarkFeatureConfiguration,
       CcToolchainProviderT starlarkCcToolchainProvider,
       Sequence<?> sources, // <FileT> expected
       Sequence<?> publicHeaders, // <FileT> expected
       Sequence<?> privateHeaders, // <FileT> expected
+      Object textualHeaders,
+      Object additionalExportedHeaders,
       Sequence<?> includes, // <String> expected
       Sequence<?> quoteIncludes, // <String> expected
       Sequence<?> systemIncludes, // <String> expected
@@ -263,6 +330,14 @@ public interface BazelCcModuleApi<
       boolean disallowPicOutputs,
       boolean disallowNopicOutputs,
       Sequence<?> additionalInputs, // <FileT> expected
+      Object moduleMap,
+      Object additionalModuleMaps,
+      Object propagateModuleMapToCompileAction,
+      Object doNotGenerateModuleMap,
+      Object codeCoverageEnabled,
+      Object hdrsCheckingMode,
+      Object variablesExtension,
+      Object language,
       StarlarkThread thread)
       throws EvalException, InterruptedException;
 
@@ -273,7 +348,6 @@ public interface BazelCcModuleApi<
       parameters = {
         @Param(
             name = "actions",
-            type = StarlarkActionFactoryApi.class,
             positional = false,
             named = true,
             doc = "<code>actions</code> object."),
@@ -281,21 +355,18 @@ public interface BazelCcModuleApi<
             name = "feature_configuration",
             doc = "<code>feature_configuration</code> to be queried.",
             positional = false,
-            named = true,
-            type = FeatureConfigurationApi.class),
+            named = true),
         @Param(
             name = "cc_toolchain",
             doc = "<code>CcToolchainInfo</code> provider to be used.",
             positional = false,
-            named = true,
-            type = CcToolchainProviderApi.class),
+            named = true),
         @Param(
             name = "compilation_outputs",
             doc = "Compilation outputs containing object files to link.",
             positional = false,
             named = true,
             defaultValue = "None",
-            noneable = true,
             allowedTypes = {
               @ParamType(type = CcCompilationOutputsApi.class),
               @ParamType(type = NoneType.class)
@@ -305,8 +376,7 @@ public interface BazelCcModuleApi<
             doc = "Additional list of linker options.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "linking_contexts",
             doc =
@@ -314,37 +384,32 @@ public interface BazelCcModuleApi<
                     + "generated by this rule.",
             positional = false,
             named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+            defaultValue = "[]"),
         @Param(
             name = "name",
             doc =
                 "This is used for naming the output artifacts of actions created by this "
                     + "method.",
             positional = false,
-            named = true,
-            type = String.class),
+            named = true),
         @Param(
             name = "language",
             doc = "Only C++ supported for now. Do not use this parameter.",
             positional = false,
             named = true,
-            defaultValue = "'c++'",
-            type = String.class),
+            defaultValue = "'c++'"),
         @Param(
             name = "output_type",
             doc = "Can be either 'executable' or 'dynamic_library'.",
             positional = false,
             named = true,
-            defaultValue = "'executable'",
-            type = String.class),
+            defaultValue = "'executable'"),
         @Param(
             name = "link_deps_statically",
             doc = " True to link dependencies statically, False dynamically.",
             positional = false,
             named = true,
-            defaultValue = "True",
-            type = Boolean.class),
+            defaultValue = "True"),
         @Param(
             name = "stamp",
             doc =
@@ -355,22 +420,96 @@ public interface BazelCcModuleApi<
                     + "unset (or set to 0) when generating the executable output for test rules.",
             positional = false,
             named = true,
-            defaultValue = "0",
-            type = StarlarkInt.class),
+            defaultValue = "0"),
         @Param(
             name = "additional_inputs",
             doc = "For additional inputs to the linking action, e.g.: linking scripts.",
             positional = false,
             named = true,
             defaultValue = "[]",
-            type = Sequence.class),
+            allowedTypes = {
+              @ParamType(type = Sequence.class),
+              @ParamType(type = Depset.class),
+            }),
         @Param(
             name = "grep_includes",
             positional = false,
             named = true,
-            noneable = true,
             defaultValue = "None",
-            allowedTypes = {@ParamType(type = FileApi.class), @ParamType(type = NoneType.class)}),
+            allowedTypes = {
+              @ParamType(type = FileApi.class),
+              @ParamType(type = NoneType.class),
+            }),
+        @Param(
+            name = "link_artifact_name_suffix",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = String.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "never_link",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Boolean.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "always_link",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Boolean.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "test_only_target",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Boolean.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "variables_extension",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Dict.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "native_deps",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Boolean.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "whole_archive",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Boolean.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "additional_linkstamp_defines",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "only_for_dynamic_libs",
+            positional = false,
+            named = true,
+            documented = false,
+            allowedTypes = {@ParamType(type = Boolean.class)},
+            defaultValue = "unbound"),
+        @Param(
+            name = "additional_outputs",
+            doc = "For additional outputs to the linking action, e.g.: map files.",
+            positional = false,
+            named = true,
+            allowedTypes = {@ParamType(type = Sequence.class)},
+            defaultValue = "unbound")
       })
   LinkingOutputsT link(
       StarlarkActionFactoryT starlarkActionFactoryApi,
@@ -384,8 +523,18 @@ public interface BazelCcModuleApi<
       String outputType,
       boolean linkDepsStatically,
       StarlarkInt stamp,
-      Sequence<?> additionalInputs, // <FileT> expected
+      Object additionalInputs, // <FileT> expected
       Object grepIncludes,
+      Object linkArtifactNameSuffix,
+      Object neverLink,
+      Object alwaysLink,
+      Object testOnlyTarget,
+      Object variablesExtension,
+      Object nativeDeps,
+      Object wholeArchive,
+      Object additionalLinkstampDefines,
+      Object onlyForDynamicLibs,
+      Object linkerOutputs,
       StarlarkThread thread)
       throws InterruptedException, EvalException;
 
@@ -398,17 +547,21 @@ public interface BazelCcModuleApi<
             doc = "List of object files.",
             positional = false,
             named = true,
-            noneable = true,
             defaultValue = "None",
-            allowedTypes = {@ParamType(type = Depset.class), @ParamType(type = NoneType.class)}),
+            allowedTypes = {
+              @ParamType(type = Depset.class),
+              @ParamType(type = NoneType.class),
+            }),
         @Param(
             name = "pic_objects",
             doc = "List of pic object files.",
             positional = false,
             named = true,
-            noneable = true,
             defaultValue = "None",
-            allowedTypes = {@ParamType(type = Depset.class), @ParamType(type = NoneType.class)}),
+            allowedTypes = {
+              @ParamType(type = Depset.class),
+              @ParamType(type = NoneType.class),
+            }),
       })
   CompilationOutputsT createCompilationOutputsFromStarlark(
       Object objectsObject, Object picObjectsObject) throws EvalException;
@@ -417,12 +570,7 @@ public interface BazelCcModuleApi<
       name = "merge_compilation_outputs",
       doc = "Merge compilation outputs.",
       parameters = {
-        @Param(
-            name = "compilation_outputs",
-            positional = false,
-            named = true,
-            defaultValue = "[]",
-            type = Sequence.class),
+        @Param(name = "compilation_outputs", positional = false, named = true, defaultValue = "[]"),
       })
   CompilationOutputsT mergeCcCompilationOutputsFromStarlark(
       Sequence<?> compilationOutputs) // <CompilationOutputsT> expected

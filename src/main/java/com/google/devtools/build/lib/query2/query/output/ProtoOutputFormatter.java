@@ -104,6 +104,7 @@ public class ProtoOutputFormatter extends AbstractUnorderedFormatter {
   private AspectResolver aspectResolver;
   private DependencyFilter dependencyFilter;
   private boolean relativeLocations;
+  private boolean displaySourceFileLocation;
   private boolean includeDefaultValues = true;
   private Predicate<String> ruleAttributePredicate = Predicates.alwaysTrue();
   private boolean flattenSelects = true;
@@ -128,6 +129,7 @@ public class ProtoOutputFormatter extends AbstractUnorderedFormatter {
     this.aspectResolver = aspectResolver;
     this.dependencyFilter = FormatUtils.getDependencyFilter(options);
     this.relativeLocations = options.relativeLocations;
+    this.displaySourceFileLocation = options.displaySourceFileLocation;
     this.includeDefaultValues = options.protoIncludeDefaultValues;
     this.ruleAttributePredicate = newAttributePredicate(options.protoOutputRuleAttributes);
     this.flattenSelects = options.protoFlattenSelects;
@@ -302,7 +304,8 @@ public class ProtoOutputFormatter extends AbstractUnorderedFormatter {
           .setName(label.toString());
 
       if (includeLocations) {
-        input.setLocation(FormatUtils.getLocation(target, relativeLocations));
+        input.setLocation(
+            FormatUtils.getLocation(target, relativeLocations, displaySourceFileLocation));
       }
 
       if (inputFile.getName().equals("BUILD")) {
@@ -385,9 +388,7 @@ public class ProtoOutputFormatter extends AbstractUnorderedFormatter {
       }
       Object attributeValue;
       if (flattenSelects || !attributeMapper.isConfigurable(attr.getName())) {
-        attributeValue =
-            flattenAttributeValues(
-                attr.getType(), PossibleAttributeValues.forRuleAndAttribute(rule, attr));
+        attributeValue = getFlattenedAttributeValues(attr.getType(), rule, attr);
       } else {
         attributeValue = attributeMapper.getSelectorList(attr.getName(), attr.getType());
       }
@@ -473,20 +474,23 @@ public class ProtoOutputFormatter extends AbstractUnorderedFormatter {
   }
 
   /**
-   * Coerces the list {@param possibleValues} of values of type {@param attrType} to a single
-   * value of that type, in the following way:
+   * Coerces the list {@code possibleValues} of values of type {@code attrType} to a single value of
+   * that type, in the following way:
    *
    * <p>If the list contains a single value, return that value.
    *
    * <p>If the list contains zero or multiple values and the type is a scalar type, return {@code
    * null}.
    *
-   * <p>If the list contains zero or multiple values and the type is a collection or map type,
-   * merge the collections/maps in the list and return the merged collection/map.
+   * <p>If the list contains zero or multiple values and the type is a collection or map type, merge
+   * the collections/maps in the list and return the merged collection/map.
    */
   @Nullable
   @SuppressWarnings("unchecked")
-  private static Object flattenAttributeValues(Type<?> attrType, Iterable<Object> possibleValues) {
+  private static Object getFlattenedAttributeValues(Type<?> attrType, Rule rule, Attribute attr) {
+    boolean treatMultipleAsNone = SCALAR_TYPES.contains(attrType);
+    Iterable<Object> possibleValues =
+        PossibleAttributeValues.forRuleAndAttribute(rule, attr, treatMultipleAsNone);
 
     // If there is only one possible value, return it.
     if (Iterables.size(possibleValues) == 1) {

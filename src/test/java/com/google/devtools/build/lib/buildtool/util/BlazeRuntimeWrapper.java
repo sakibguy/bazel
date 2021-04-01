@@ -14,6 +14,9 @@
 
 package com.google.devtools.build.lib.buildtool.util;
 
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.ImmutableList.toImmutableList;
+
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
@@ -25,6 +28,8 @@ import com.google.devtools.build.lib.analysis.BlazeDirectories;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.ServerDirectories;
 import com.google.devtools.build.lib.analysis.config.BuildConfigurationCollection;
+import com.google.devtools.build.lib.bugreport.Crash;
+import com.google.devtools.build.lib.bugreport.CrashContext;
 import com.google.devtools.build.lib.buildeventstream.BuildEventProtocolOptions;
 import com.google.devtools.build.lib.buildtool.BuildRequest;
 import com.google.devtools.build.lib.buildtool.BuildRequestOptions;
@@ -40,9 +45,9 @@ import com.google.devtools.build.lib.pkgcache.LoadingOptions;
 import com.google.devtools.build.lib.pkgcache.PackageOptions;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
-import com.google.devtools.build.lib.query2.aquery.AqueryOptions;
 import com.google.devtools.build.lib.runtime.BlazeCommand;
 import com.google.devtools.build.lib.runtime.BlazeCommandResult;
+import com.google.devtools.build.lib.runtime.BlazeCommandUtils;
 import com.google.devtools.build.lib.runtime.BlazeModule;
 import com.google.devtools.build.lib.runtime.BlazeRuntime;
 import com.google.devtools.build.lib.runtime.ClientOptions;
@@ -65,18 +70,20 @@ import com.google.devtools.common.options.InvocationPolicyEnforcer;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
 import com.google.devtools.common.options.OptionsParsingException;
-import java.io.PrintStream;
+import com.google.protobuf.Any;
+import com.google.protobuf.Message;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * A wrapper for {@link BlazeRuntime} for testing purposes that makes it possible to exercise
- * (most) of the build machinery in integration tests. Note that {@code BlazeCommandDispatcher}
- * is not exercised here.
+ * A wrapper for {@link BlazeRuntime} for testing purposes that makes it possible to exercise (most)
+ * of the build machinery in integration tests. Note that {@code BlazeCommandDispatcher} is not
+ * exercised here.
  */
 public class BlazeRuntimeWrapper {
+
   private final BlazeRuntime runtime;
   private CommandEnvironment env;
   private final EventCollectionApparatus events;
@@ -89,13 +96,17 @@ public class BlazeRuntimeWrapper {
 
   private OptionsParser optionsParser;
   private ImmutableList.Builder<String> optionsToParse = new ImmutableList.Builder<>();
+  private final List<Class<? extends OptionsBase>> additionalOptionsClasses = new ArrayList<>();
 
   private final List<Object> eventBusSubscribers = new ArrayList<>();
 
   public BlazeRuntimeWrapper(
-      EventCollectionApparatus events, ServerDirectories serverDirectories,
-      BlazeDirectories directories, BinTools binTools, BlazeRuntime.Builder builder)
-          throws Exception {
+      EventCollectionApparatus events,
+      ServerDirectories serverDirectories,
+      BlazeDirectories directories,
+      BinTools binTools,
+      BlazeRuntime.Builder builder)
+      throws Exception {
     this.events = events;
     runtime =
         builder
@@ -152,8 +163,8 @@ public class BlazeRuntimeWrapper {
                 PackageOptions.class,
                 BuildLanguageOptions.class,
                 UiOptions.class,
-                SandboxOptions.class,
-                AqueryOptions.class));
+                SandboxOptions.class));
+    options.addAll(additionalOptionsClasses);
 
     for (BlazeModule module : runtime.getBlazeModules()) {
       Iterables.addAll(options, module.getCommonCommandOptions());
@@ -174,7 +185,7 @@ public class BlazeRuntimeWrapper {
     }
   }
 
-  public BlazeRuntime getRuntime() {
+  public final BlazeRuntime getRuntime() {
     return runtime;
   }
 
@@ -188,28 +199,40 @@ public class BlazeRuntimeWrapper {
   }
 
   /** Creates a new command environment; executeBuild does this automatically if you do not. */
-  public final CommandEnvironment newCommand(Class<? extends BlazeCommand> buildCommand)
+  public final CommandEnvironment newCommand(Class<? extends BlazeCommand> command)
       throws Exception {
+    return newCommandWithExtensions(command, /*extensions=*/ ImmutableList.of());
+  }
+
+  /**
+   * Creates a new command environment with additional proto extensions as if they were passed to
+   * the blaze server.
+   */
+  public final CommandEnvironment newCommandWithExtensions(
+      Class<? extends BlazeCommand> command, List<Message> extensions) throws Exception {
+    additionalOptionsClasses.addAll(
+        BlazeCommandUtils.getOptions(
+            command, runtime.getBlazeModules(), runtime.getRuleClassProvider()));
     initializeOptionsParser();
     commandCreated = true;
     if (env != null) {
       runtime.afterCommand(env, BlazeCommandResult.success());
     }
 
-    if (optionsParser == null) {
-      throw new IllegalArgumentException("The options parser must be initialized before creating "
-          + "a new command environment");
-    }
+    checkNotNull(
+        optionsParser,
+        "The options parser must be initialized before creating a new command environment");
 
     env =
         runtime
             .getWorkspace()
             .initCommand(
-                buildCommand.getAnnotation(Command.class),
+                command.getAnnotation(Command.class),
                 optionsParser,
                 new ArrayList<>(),
                 0L,
-                0L);
+                0L,
+                extensions.stream().map(Any::pack).collect(toImmutableList()));
     return env;
   }
 
@@ -245,7 +268,11 @@ public class BlazeRuntimeWrapper {
     return optionsParser.getOptions(optionsClass);
   }
 
-  protected void finalizeBuildResult(@SuppressWarnings("unused") BuildResult request) {}
+  public void addOptionsClass(Class<? extends OptionsBase> optionsClass) {
+    additionalOptionsClasses.add(optionsClass);
+  }
+
+  void finalizeBuildResult(@SuppressWarnings("unused") BuildResult request) {}
 
   /**
    * Initializes a new options parser, parsing all the options set by {@link
@@ -266,31 +293,27 @@ public class BlazeRuntimeWrapper {
     }
     commandCreated = false;
     BuildTool buildTool = new BuildTool(env);
-    PrintStream origSystemOut = System.out;
-    PrintStream origSystemErr = System.err;
-    try {
+    try (OutErr.SystemPatcher systemOutErrPatcher =
+        env.getReporter().getOutErr().getSystemPatcher()) {
       Profiler.instance()
           .start(
-              ImmutableSet.of(),
-              /* stream= */ null,
-              /* format= */ null,
-              /* outputBase= */ null,
-              /* buildID= */ null,
-              /* recordAllDurations= */ false,
+              /*profiledTasks=*/ ImmutableSet.of(),
+              /*stream=*/ null,
+              /*format=*/ null,
+              /*outputBase=*/ null,
+              /*buildID=*/ null,
+              /*recordAllDurations=*/ false,
               new JavaClock(),
-              /* execStartTimeNanos= */ 42,
-              /* enabledCpuUsageProfiling= */ false,
-              /* slimProfile= */ false,
-              /* includePrimaryOutput= */ false,
-              /* includeTargetLabel= */ false);
-      OutErr outErr = env.getReporter().getOutErr();
-      System.setOut(new PrintStream(outErr.getOutputStream(), /*autoflush=*/ true));
-      System.setErr(new PrintStream(outErr.getErrorStream(), /*autoflush=*/ true));
+              /*execStartTimeNanos=*/ 42,
+              /*enabledCpuUsageProfiling=*/ false,
+              /*slimProfile=*/ false,
+              /*includePrimaryOutput=*/ false,
+              /*includeTargetLabel=*/ false);
 
       // This cannot go into newCommand, because we hook up the EventCollectionApparatus as a
       // module, and after that ran, further changes to the apparatus aren't reflected on the
       // reporter.
-      for (BlazeModule module : getRuntime().getBlazeModules()) {
+      for (BlazeModule module : runtime.getBlazeModules()) {
         module.beforeCommand(env);
       }
       EventBus eventBus = env.getEventBus();
@@ -302,36 +325,40 @@ public class BlazeRuntimeWrapper {
 
       lastRequest = createRequest(env.getCommandName(), targets);
       lastResult = new BuildResult(lastRequest.getStartTime());
-      boolean success = false;
 
-      for (BlazeModule module : getRuntime().getBlazeModules()) {
+      for (BlazeModule module : runtime.getBlazeModules()) {
         env.getSkyframeExecutor().injectExtraPrecomputedValues(module.getPrecomputedValues());
       }
 
+      Crash crash = null;
+      DetailedExitCode detailedExitCode = DetailedExitCode.of(createGenericDetailedFailure());
       try {
         try (SilentCloseable c = Profiler.instance().profile("syncPackageLoading")) {
           env.syncPackageLoading(lastRequest);
         }
         buildTool.buildTargets(lastRequest, lastResult, null);
-        success = true;
+        detailedExitCode = DetailedExitCode.success();
+      } catch (RuntimeException | Error e) {
+        crash = Crash.from(e);
+        detailedExitCode = crash.getDetailedExitCode();
+        throw e;
       } finally {
-        env
-            .getTimestampGranularityMonitor()
-            .waitForTimestampGranularity(lastRequest.getOutErr());
+        env.getTimestampGranularityMonitor().waitForTimestampGranularity(lastRequest.getOutErr());
         this.configurations = lastResult.getBuildConfigurationCollection();
         finalizeBuildResult(lastResult);
         buildTool.stopRequest(
             lastResult,
-            null,
-            success
-                ? DetailedExitCode.success()
-                : DetailedExitCode.of(createGenericDetailedFailure()),
+            crash != null ? crash.getThrowable() : null,
+            detailedExitCode,
             /*startSuspendCount=*/ 0);
         getSkyframeExecutor().notifyCommandComplete(env.getReporter());
+        if (crash != null) {
+          runtime
+              .getBugReporter()
+              .handleCrash(crash, CrashContext.keepAlive().reportingTo(env.getReporter()));
+        }
       }
     } finally {
-      System.setOut(origSystemOut);
-      System.setErr(origSystemErr);
       Profiler.instance().stop();
     }
   }
@@ -343,19 +370,20 @@ public class BlazeRuntimeWrapper {
   }
 
   BuildRequest createRequest(String commandName, List<String> targets) {
-    BuildRequest request =
-        BuildRequest.create(
-            commandName,
-            optionsParser,
-            null,
-            targets,
-            env.getReporter().getOutErr(),
-            env.getCommandId(),
-            runtime.getClock().currentTimeMillis());
+
+    BuildRequest.Builder builder =
+        BuildRequest.builder()
+            .setCommandName(commandName)
+            .setId(env.getCommandId())
+            .setOptions(optionsParser)
+            .setStartupOptions(null)
+            .setOutErr(env.getReporter().getOutErr())
+            .setTargets(targets)
+            .setStartTimeMillis(runtime.getClock().currentTimeMillis());
     if ("test".equals(commandName)) {
-      request.setRunTests();
+      builder.setRunTests(true);
     }
-    return request;
+    return builder.build();
   }
 
   public BuildRequest getLastRequest() {

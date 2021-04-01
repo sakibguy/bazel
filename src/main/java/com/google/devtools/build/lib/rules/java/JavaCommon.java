@@ -60,7 +60,8 @@ public class JavaCommon {
   public static final InstrumentationSpec JAVA_COLLECTION_SPEC =
       new InstrumentationSpec(FileTypeSet.of(JavaSemantics.JAVA_SOURCE))
           .withSourceAttributes("srcs")
-          .withDependencyAttributes("deps", "data", "resources", "exports", "runtime_deps");
+          .withDependencyAttributes(
+              "deps", "data", "resources", "resource_jars", "exports", "runtime_deps", "jars");
 
   private ClasspathConfiguredFragment classpathFragment = new ClasspathConfiguredFragment();
   private JavaCompilationArtifacts javaArtifacts = JavaCompilationArtifacts.EMPTY;
@@ -134,24 +135,6 @@ public class JavaCommon {
 
   public JavaSemantics getJavaSemantics() {
     return semantics;
-  }
-
-  /**
-   * Validates that the packages listed under "deps" all have the given constraint. If a package
-   * does not have this attribute, an error is generated.
-   */
-  public static final void validateConstraint(
-      RuleContext ruleContext,
-      String constraint,
-      Iterable<? extends TransitiveInfoCollection> targets) {
-    for (TransitiveInfoCollection target : targets) {
-      JavaInfo javaInfo = JavaInfo.getJavaInfo(target);
-      if (javaInfo != null && !javaInfo.getJavaConstraints().contains(constraint)) {
-        ruleContext.attributeError(
-            "deps",
-            String.format("%s: does not have constraint '%s'", target.getLabel(), constraint));
-      }
-    }
   }
 
   /**
@@ -230,12 +213,6 @@ public class JavaCommon {
    */
   public JavaCompilationArgsProvider collectJavaCompilationArgs(
       boolean isNeverLink, boolean srcLessDepsExport) {
-    return collectJavaCompilationArgs(
-        isNeverLink, srcLessDepsExport, /* javaProtoLibraryStrictDeps= */ false);
-  }
-
-  public JavaCompilationArgsProvider collectJavaCompilationArgs(
-      boolean isNeverLink, boolean srcLessDepsExport, boolean javaProtoLibraryStrictDeps) {
     return collectJavaCompilationArgs(
         /* isNeverLink= */ isNeverLink,
         /* srcLessDepsExport= */ srcLessDepsExport,
@@ -322,32 +299,6 @@ public class JavaCommon {
         }
       }
     }
-  }
-
-  public static void checkRuleLoadedThroughMacro(RuleContext ruleContext) {
-    if (!ruleContext.getFragment(JavaConfiguration.class).loadJavaRulesFromBzl()) {
-      return;
-    }
-
-    if (!hasValidTag(ruleContext) || !ruleContext.getRule().wasCreatedByMacro()) {
-      registerMigrationRuleError(ruleContext);
-    }
-  }
-
-  private static boolean hasValidTag(RuleContext ruleContext) {
-    return ruleContext
-        .attributes()
-        .get("tags", Type.STRING_LIST)
-        .contains("__JAVA_RULES_MIGRATION_DO_NOT_USE_WILL_BREAK__");
-  }
-
-  private static void registerMigrationRuleError(RuleContext ruleContext) {
-    ruleContext.ruleError(
-        "The native Java rules are deprecated. Please load "
-            + ruleContext.getRule().getRuleClass()
-            + " from the rules_java repository. See http://github.com/bazelbuild/rules_java and "
-            + "https://github.com/bazelbuild/bazel/issues/8741. You can temporarily bypass this "
-            + "error by setting --incompatible_load_java_rules_from_bzl=false.");
   }
 
   /**
@@ -567,7 +518,7 @@ public class JavaCommon {
     }
   }
 
-  public JavaTargetAttributes.Builder initCommon() throws InterruptedException {
+  public JavaTargetAttributes.Builder initCommon() {
     return initCommon(ImmutableList.of(), getCompatibleJavacOptions());
   }
 
@@ -580,7 +531,7 @@ public class JavaCommon {
    * @return the processed attributes
    */
   public JavaTargetAttributes.Builder initCommon(
-      Collection<Artifact> extraSrcs, Iterable<String> extraJavacOpts) throws InterruptedException {
+      Collection<Artifact> extraSrcs, Iterable<String> extraJavacOpts) {
     Preconditions.checkState(javacOpts == null);
     javacOpts = computeJavacOpts(ImmutableList.copyOf(extraJavacOpts));
     activePlugins = collectPlugins();
@@ -596,7 +547,7 @@ public class JavaCommon {
 
     if (disallowDepsWithoutSrcs(ruleContext.getRule().getRuleClass())
         && ruleContext.attributes().get("srcs", BuildType.LABEL_LIST).isEmpty()
-        && ruleContext.getRule().isAttributeValueExplicitlySpecified("deps")) {
+        && !ruleContext.attributes().get("deps", BuildType.LABEL_LIST).isEmpty()) {
       ruleContext.attributeError("deps", "deps not allowed without srcs; move to runtime_deps?");
     }
 
@@ -880,7 +831,6 @@ public class JavaCommon {
                 ruleContext.getConfiguration().legacyExternalRunfiles())
             .addArtifacts(javaArtifacts.getRuntimeJars());
     runfilesBuilder.addRunfiles(ruleContext, RunfilesProvider.DEFAULT_RUNFILES);
-    runfilesBuilder.add(ruleContext, JavaRunfilesProvider.TO_RUNFILES);
 
     List<TransitiveInfoCollection> depsForRunfiles = new ArrayList<>();
     if (ruleContext.getRule().isAttrDefined("runtime_deps", BuildType.LABEL_LIST)) {
@@ -891,7 +841,6 @@ public class JavaCommon {
     }
 
     runfilesBuilder.addTargets(depsForRunfiles, RunfilesProvider.DEFAULT_RUNFILES);
-    runfilesBuilder.addTargets(depsForRunfiles, JavaRunfilesProvider.TO_RUNFILES);
 
     TransitiveInfoCollection launcher = JavaHelper.launcherForTarget(semantics, ruleContext);
     if (launcher != null) {

@@ -49,6 +49,7 @@ filegroup(
     srcs = [
         ":WORKSPACE",
         ":distdir.bzl",
+        ":distdir_deps.bzl",
     ],
     visibility = [
         "//src/test/shell/bazel:__subpackages__",
@@ -108,9 +109,24 @@ filegroup(
     visibility = ["//:__subpackages__"],
 )
 
+# Additional generated files that are not Java sources (which could otherwise
+# be included in //src:derived_java_sources).
+filegroup(
+    name = "generated_resources",
+    srcs = [
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules:builtins_bzl.zip",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules:coverage.WORKSPACE",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/cpp:cc_configure.WORKSPACE",
+        "//src/main/java/com/google/devtools/build/lib/bazel/rules/java:jdk.WORKSPACE",
+    ],
+)
+
 pkg_tar(
     name = "bazel-srcs",
-    srcs = [":srcs"],
+    srcs = [
+        ":generated_resources",
+        ":srcs",
+    ],
     remap_paths = {
         "WORKSPACE.filtered": "WORKSPACE",
         # Rewrite paths coming from local repositories back into third_party.
@@ -171,15 +187,6 @@ genrule(
     visibility = ["//:__subpackages__"],
 )
 
-# This is a workaround for fetching Bazel toolchains, for remote execution.
-# See https://github.com/bazelbuild/bazel/issues/3246.
-# Will be removed once toolchain fetching is supported.
-filegroup(
-    name = "dummy_toolchain_reference",
-    srcs = ["@bazel_toolchains//configs/debian8_clang/0.2.0/bazel_0.9.0:empty"],
-    visibility = ["//visibility:public"],
-)
-
 constraint_setting(name = "machine_size")
 
 # A machine with "high cpu count".
@@ -231,7 +238,7 @@ REMOTE_PLATFORMS = ("rbe_ubuntu1604_java8", "rbe_ubuntu1804_java11")
             {PARENT_REMOTE_EXECUTION_PROPERTIES}
             properties: {
                 name: "gceMachineType"
-                value: "n1-highcpu-32"
+                value: "e2-highcpu-32"
             }
             """,
     )

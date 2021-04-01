@@ -172,7 +172,9 @@ public class CcToolchainProviderHelper {
     ImmutableList.Builder<PathFragment> builtInIncludeDirectoriesBuilder = ImmutableList.builder();
     for (String s : toolchainConfigInfo.getCxxBuiltinIncludeDirectories()) {
       try {
-        builtInIncludeDirectoriesBuilder.add(resolveIncludeDir(s, sysroot, toolsDirectory));
+        builtInIncludeDirectoriesBuilder.add(
+            resolveIncludeDir(
+                s, sysroot, toolsDirectory, configuration.isSiblingRepositoryLayout()));
       } catch (InvalidConfigurationException e) {
         ruleContext.ruleError(e.getMessage());
       }
@@ -187,7 +189,6 @@ public class CcToolchainProviderHelper {
         attributes.getAllowlistForLooseHeaderCheck();
 
     return new CcToolchainProvider(
-        getToolchainForStarlark(toolPaths),
         cppConfiguration,
         toolchainFeatures,
         toolsDirectory,
@@ -249,7 +250,16 @@ public class CcToolchainProviderHelper {
         computeAdditionalMakeVariables(toolchainConfigInfo),
         computeLegacyCcFlagsMakeVariable(toolchainConfigInfo),
         allowlistForLayeringCheck,
-        allowlistForLooseHeaderCheck);
+        allowlistForLooseHeaderCheck,
+        getStarlarkValueForTool(Tool.OBJCOPY, toolPaths),
+        getStarlarkValueForTool(Tool.GCC, toolPaths),
+        getStarlarkValueForTool(Tool.CPP, toolPaths),
+        getStarlarkValueForTool(Tool.NM, toolPaths),
+        getStarlarkValueForTool(Tool.OBJDUMP, toolPaths),
+        getStarlarkValueForTool(Tool.AR, toolPaths),
+        getStarlarkValueForTool(Tool.STRIP, toolPaths),
+        getStarlarkValueForTool(Tool.LD, toolPaths),
+        getStarlarkValueForTool(Tool.GCOV, toolPaths));
   }
 
   @Nullable
@@ -323,7 +333,10 @@ public class CcToolchainProviderHelper {
    * <p>If it is absolute, it remains unchanged.
    */
   static PathFragment resolveIncludeDir(
-      String s, PathFragment sysroot, PathFragment crosstoolTopPathFragment)
+      String s,
+      PathFragment sysroot,
+      PathFragment crosstoolTopPathFragment,
+      boolean siblingRepositoryLayout)
       throws InvalidConfigurationException {
     PathFragment pathPrefix;
     String pathString;
@@ -332,7 +345,7 @@ public class CcToolchainProviderHelper {
       String packageString = s.substring(PACKAGE_START.length(), packageEndIndex);
       try {
         // TODO(jungjw): This should probably be getExecPath.
-        pathPrefix = PackageIdentifier.parse(packageString).getPackagePath();
+        pathPrefix = PackageIdentifier.parse(packageString).getPackagePath(siblingRepositoryLayout);
       } catch (LabelSyntaxException e) {
         throw new InvalidConfigurationException("The package '" + packageString + "' is not valid");
       }
@@ -368,9 +381,6 @@ public class CcToolchainProviderHelper {
       }
     }
 
-    if (!PathFragment.isNormalized(pathString)) {
-      throw new InvalidConfigurationException("The include path '" + s + "' is not normalized.");
-    }
     PathFragment path = PathFragment.create(pathString);
     return pathPrefix.getRelative(path);
   }
@@ -379,20 +389,6 @@ public class CcToolchainProviderHelper {
       Tool tool, ImmutableMap<String, PathFragment> toolPaths) {
     PathFragment toolPath = getToolPathFragment(toolPaths, tool);
     return toolPath != null ? toolPath.getPathString() : "";
-  }
-
-  private static ImmutableMap<String, Object> getToolchainForStarlark(
-      ImmutableMap<String, PathFragment> toolPaths) {
-    return ImmutableMap.<String, Object>builder()
-        .put("objcopy_executable", getStarlarkValueForTool(Tool.OBJCOPY, toolPaths))
-        .put("compiler_executable", getStarlarkValueForTool(Tool.GCC, toolPaths))
-        .put("preprocessor_executable", getStarlarkValueForTool(Tool.CPP, toolPaths))
-        .put("nm_executable", getStarlarkValueForTool(Tool.NM, toolPaths))
-        .put("objdump_executable", getStarlarkValueForTool(Tool.OBJDUMP, toolPaths))
-        .put("ar_executable", getStarlarkValueForTool(Tool.AR, toolPaths))
-        .put("strip_executable", getStarlarkValueForTool(Tool.STRIP, toolPaths))
-        .put("ld_executable", getStarlarkValueForTool(Tool.LD, toolPaths))
-        .build();
   }
 
   private static PathFragment calculateSysroot(Label libcTopLabel, PathFragment defaultSysroot) {
@@ -483,7 +479,7 @@ public class CcToolchainProviderHelper {
                 if (tool == CppConfiguration.Tool.DWP) {
                   // TODO(hlopko): check dwp tool in analysis when per_object_debug_info is enabled.
                   return false;
-                } else if (tool == CppConfiguration.Tool.LLVM_PROFDATA) {
+                } else if (tool == CppConfiguration.Tool.LLVM_PROFDATA || tool == Tool.LLVM_COV) {
                   // TODO(tmsriram): Fix this to check if this is a llvm crosstool
                   // and return true.  This needs changes to crosstool_config.proto.
                   return false;

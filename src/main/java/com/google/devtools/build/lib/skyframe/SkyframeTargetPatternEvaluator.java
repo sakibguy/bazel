@@ -228,9 +228,7 @@ final class SkyframeTargetPatternEvaluator implements TargetPatternPreloader {
 
     private SimpleLookup(String pattern, TargetPatternKey key) {
       this(
-          pattern,
-          PackageValue.key(key.getParsedPattern().getDirectoryForTargetOrTargetsInPackage()),
-          key.getParsedPattern());
+          pattern, PackageValue.key(key.getParsedPattern().getDirectory()), key.getParsedPattern());
     }
 
     private SimpleLookup(String pattern, PackageValue.Key key, TargetPattern targetPattern) {
@@ -256,8 +254,8 @@ final class SkyframeTargetPatternEvaluator implements TargetPatternPreloader {
       AtomicReference<Collection<Target>> result = new AtomicReference<>();
       targetPattern.eval(
           resolver,
-          /*ignoredSubdirectories=*/ ImmutableSet.<PathFragment>of(),
-          /*excludedSubdirectories=*/ ImmutableSet.<PathFragment>of(),
+          /*ignoredSubdirectories=*/ ImmutableSet::of,
+          /*excludedSubdirectories=*/ ImmutableSet.of(),
           partialResult ->
               result.set(
                   partialResult instanceof Collection

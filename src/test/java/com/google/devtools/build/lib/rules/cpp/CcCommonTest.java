@@ -242,9 +242,37 @@ public class CcCommonTest extends BuildViewTestCase {
             "cc_library(name = 'defineslib',",
             "           srcs = ['defines.cc'],",
             "           defines = ['FOO', 'BAR'])");
-    assertThat(isolatedDefines.get(CcInfo.PROVIDER).getCcCompilationContext().getDefines().toList())
+    assertThat(isolatedDefines.get(CcInfo.PROVIDER).getCcCompilationContext().getDefines())
         .containsExactly("FOO", "BAR")
         .inOrder();
+  }
+
+  @Test
+  public void testExpandedDefinesAgainstDeps() throws Exception {
+    ConfiguredTarget expandedDefines =
+        scratchConfiguredTarget(
+            "expanded_defines",
+            "expand_deps",
+            "cc_library(name = 'expand_deps',",
+            "           srcs = ['defines.cc'],",
+            "           deps = ['//foo'],",
+            "           defines = ['FOO=$(location //foo)'])");
+    assertThat(expandedDefines.get(CcInfo.PROVIDER).getCcCompilationContext().getDefines())
+        .containsExactly(
+            String.format("FOO=%s/foo/libfoo.a", getRuleContext(expandedDefines).getBinFragment()));
+  }
+
+  @Test
+  public void testExpandedDefinesAgainstSrcs() throws Exception {
+    ConfiguredTarget expandedDefines =
+        scratchConfiguredTarget(
+            "expanded_defines",
+            "expand_srcs",
+            "cc_library(name = 'expand_srcs',",
+            "           srcs = ['defines.cc'],",
+            "           defines = ['FOO=$(location defines.cc)'])");
+    assertThat(expandedDefines.get(CcInfo.PROVIDER).getCcCompilationContext().getDefines())
+        .containsExactly("FOO=expanded_defines/defines.cc");
   }
 
   @Test
@@ -840,7 +868,7 @@ public class CcCommonTest extends BuildViewTestCase {
     ConfiguredTarget lib = getConfiguredTarget("//third_party/a");
     CcCompilationContext ccCompilationContext = lib.get(CcInfo.PROVIDER).getCcCompilationContext();
     assertThat(ActionsTestUtil.prettyArtifactNames(ccCompilationContext.getDeclaredIncludeSrcs()))
-        .containsExactly("third_party/a/_virtual_includes/a/lib/b/c.h");
+        .containsExactly("third_party/a/_virtual_includes/a/lib/b/c.h", "third_party/a/v1/b/c.h");
     assertThat(ccCompilationContext.getIncludeDirs())
         .containsExactly(
             getTargetConfiguration()
@@ -887,9 +915,10 @@ public class CcCommonTest extends BuildViewTestCase {
             .getCcCompilationContext();
 
     assertThat(ActionsTestUtil.prettyArtifactNames(relative.getDeclaredIncludeSrcs()))
-        .containsExactly("third_party/a/_virtual_includes/relative/b.h");
+        .containsExactly("third_party/a/_virtual_includes/relative/b.h", "third_party/a/v1/b.h");
     assertThat(ActionsTestUtil.prettyArtifactNames(absolute.getDeclaredIncludeSrcs()))
-        .containsExactly("third_party/a/_virtual_includes/absolute/a/v1/b.h");
+        .containsExactly(
+            "third_party/a/_virtual_includes/absolute/a/v1/b.h", "third_party/a/v1/b.h");
   }
 
   @Test
@@ -1047,7 +1076,7 @@ public class CcCommonTest extends BuildViewTestCase {
         .ccSupport()
         .setupCcToolchainConfig(
             mockToolsConfig,
-            CcToolchainConfig.builder().withFeatures(CppRuleClasses.COMPIILER_PARAM_FILE));
+            CcToolchainConfig.builder().withFeatures(CppRuleClasses.COMPILER_PARAM_FILE));
     scratch.file("a/BUILD", "cc_library(name='foo', srcs=['foo.cc'])");
     CppCompileAction cppCompileAction = getCppCompileAction("//a:foo");
     assertThat(
@@ -1059,6 +1088,9 @@ public class CcCommonTest extends BuildViewTestCase {
 
   @Test
   public void testClangClParameters() throws Exception {
+    if (!AnalysisMock.get().isThisBazel()) {
+      return;
+    }
     AnalysisMock.get()
         .ccSupport()
         .setupCcToolchainConfig(
@@ -1106,12 +1138,10 @@ public class CcCommonTest extends BuildViewTestCase {
   public void testCcLibraryNotLoadedThroughMacro() throws Exception {
     setupTestCcLibraryLoadedThroughMacro(/* loadMacro= */ false);
     reporter.removeHandler(failFastHandler);
-    getConfiguredTarget("//a:a");
-    assertContainsEvent("rules are deprecated");
+    assertThat(getConfiguredTarget("//a:a")).isNotNull();
   }
 
   private void setupTestCcLibraryLoadedThroughMacro(boolean loadMacro) throws Exception {
-    useConfiguration("--incompatible_load_cc_rules_from_bzl");
     scratch.file(
         "a/BUILD",
         getAnalysisMock().ccSupport().getMacroLoadStatement(loadMacro, "cc_library"),
@@ -1125,16 +1155,7 @@ public class CcCommonTest extends BuildViewTestCase {
     assertNoEvents();
   }
 
-  @Test
-  public void testFdoProfileNotLoadedThroughMacro() throws Exception {
-    setuptestFdoProfileLoadedThroughMacro(/* loadMacro= */ false);
-    reporter.removeHandler(failFastHandler);
-    getConfiguredTarget("//a:a");
-    assertContainsEvent("rules are deprecated");
-  }
-
   private void setuptestFdoProfileLoadedThroughMacro(boolean loadMacro) throws Exception {
-    useConfiguration("--incompatible_load_cc_rules_from_bzl");
     scratch.file(
         "a/BUILD",
         getAnalysisMock().ccSupport().getMacroLoadStatement(loadMacro, "fdo_profile"),
@@ -1148,16 +1169,7 @@ public class CcCommonTest extends BuildViewTestCase {
     assertNoEvents();
   }
 
-  @Test
-  public void testFdoPrefetchHintsNotLoadedThroughMacro() throws Exception {
-    setupTestFdoPrefetchHintsLoadedThroughMacro(/* loadMacro= */ false);
-    reporter.removeHandler(failFastHandler);
-    getConfiguredTarget("//a:a");
-    assertContainsEvent("rules are deprecated");
-  }
-
   private void setupTestFdoPrefetchHintsLoadedThroughMacro(boolean loadMacro) throws Exception {
-    useConfiguration("--incompatible_load_cc_rules_from_bzl");
     scratch.file(
         "a/BUILD",
         getAnalysisMock().ccSupport().getMacroLoadStatement(loadMacro, "fdo_prefetch_hints"),

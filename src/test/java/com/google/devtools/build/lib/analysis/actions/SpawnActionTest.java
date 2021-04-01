@@ -14,6 +14,7 @@
 package com.google.devtools.build.lib.analysis.actions;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.Truth8.assertThat;
 import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import static java.util.Arrays.asList;
 import static org.junit.Assert.assertThrows;
@@ -39,7 +40,7 @@ import com.google.devtools.build.lib.actions.extra.ExtraActionInfo;
 import com.google.devtools.build.lib.actions.extra.SpawnInfo;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.analysis.Runfiles;
-import com.google.devtools.build.lib.analysis.RunfilesSupplierImpl;
+import com.google.devtools.build.lib.analysis.SingleRunfilesSupplier;
 import com.google.devtools.build.lib.analysis.util.ActionTester;
 import com.google.devtools.build.lib.analysis.util.ActionTester.ActionCombinationFactory;
 import com.google.devtools.build.lib.analysis.util.AnalysisTestUtil;
@@ -157,6 +158,20 @@ public class SpawnActionTest extends BuildViewTestCase {
   }
 
   @Test
+  public void testBuilderWithExecutableInRootPcakage() throws Exception {
+    Artifact tool = getSourceArtifact("tool.bin");
+    Action[] actions =
+        builder()
+            .setExecutable(tool)
+            .addOutput(destinationArtifact)
+            .build(ActionsTestUtil.NULL_ACTION_OWNER, targetConfig);
+    collectingAnalysisEnvironment.registerAction(actions);
+    SpawnAction action = (SpawnAction) actions[0];
+    assertThat(action.getArguments()).hasSize(1);
+    assertThat(action.getArguments().get(0)).matches("\\.[/\\\\]tool.bin");
+  }
+
+  @Test
   public void testBuilderWithJavaExecutable() throws Exception {
     Action[] actions = builder()
         .addOutput(destinationArtifact)
@@ -166,8 +181,7 @@ public class SpawnActionTest extends BuildViewTestCase {
     collectingAnalysisEnvironment.registerAction(actions);
     SpawnAction action = (SpawnAction) actions[0];
     assertThat(action.getArguments())
-        .containsExactly(
-            "/bin/java", "-Xverify:none", "-jvmarg", "-cp", "pkg/exe.jar", "MyMainClass")
+        .containsExactly("/bin/java", "-jvmarg", "-cp", "pkg/exe.jar", "MyMainClass")
         .inOrder();
   }
 
@@ -193,19 +207,21 @@ public class SpawnActionTest extends BuildViewTestCase {
 
     // The action reports all arguments, including those inside the param file
     assertThat(action.getArguments())
-        .containsExactly(
-            "/bin/java", "-Xverify:none", "-jvmarg", "-cp", "pkg/exe.jar", "MyMainClass", "-X")
+        .containsExactly("/bin/java", "-jvmarg", "-cp", "pkg/exe.jar", "MyMainClass", "-X")
         .inOrder();
 
     Spawn spawn =
         action.getSpawn(
-            (artifact, outputs) -> outputs.add(artifact), ImmutableMap.of(), ImmutableMap.of());
+            (artifact, outputs) -> outputs.add(artifact),
+            ImmutableMap.of(),
+            /*envResolved=*/ false,
+            ImmutableMap.of());
     String paramFileName = output.getExecPathString() + "-0.params";
     // The spawn's primary arguments should reference the param file
     assertThat(spawn.getArguments())
         .containsExactly(
             "/bin/java",
-            "-Xverify:none",
+
             "-jvmarg",
             "-cp",
             "pkg/exe.jar",
@@ -218,7 +234,7 @@ public class SpawnActionTest extends BuildViewTestCase {
         spawn.getInputFiles().toList().stream()
             .filter(i -> i instanceof VirtualActionInput)
             .findFirst();
-    assertThat(input.isPresent()).isTrue();
+    assertThat(input).isPresent();
     VirtualActionInput paramFile = (VirtualActionInput) input.get();
     assertThat(paramFile.getBytes().toString(ISO_8859_1).trim()).isEqualTo("-X");
   }
@@ -241,7 +257,7 @@ public class SpawnActionTest extends BuildViewTestCase {
     assertThat(action.getArguments())
         .containsExactly(
             "/bin/java",
-            "-Xverify:none",
+
             "-jvmarg",
             "-cp",
             "pkg/exe.jar",
@@ -345,7 +361,7 @@ public class SpawnActionTest extends BuildViewTestCase {
         builder()
             .addInput(manifest)
             .addRunfilesSupplier(
-                new RunfilesSupplierImpl(
+                new SingleRunfilesSupplier(
                     PathFragment.create("destination"),
                     Runfiles.EMPTY,
                     manifest,
@@ -494,7 +510,7 @@ public class SpawnActionTest extends BuildViewTestCase {
   public void testWorkerSupport() throws Exception {
     SpawnAction workerSupportSpawn =
         createWorkerSupportSpawn(ImmutableMap.<String, String>of("supports-workers", "1"));
-    assertThat(Spawns.supportsWorkers(workerSupportSpawn.getSpawn())).isEqualTo(true);
+    assertThat(Spawns.supportsWorkers(workerSupportSpawn.getSpawn())).isTrue();
   }
 
   @Test
@@ -502,8 +518,7 @@ public class SpawnActionTest extends BuildViewTestCase {
     SpawnAction multiplexWorkerSupportSpawn =
         createWorkerSupportSpawn(
             ImmutableMap.<String, String>of("supports-multiplex-workers", "1"));
-    assertThat(Spawns.supportsMultiplexWorkers(multiplexWorkerSupportSpawn.getSpawn()))
-        .isEqualTo(true);
+    assertThat(Spawns.supportsMultiplexWorkers(multiplexWorkerSupportSpawn.getSpawn())).isTrue();
   }
 
   @Test
@@ -550,8 +565,29 @@ public class SpawnActionTest extends BuildViewTestCase {
         .isEqualTo("ToolPoolMnemonic");
   }
 
+  @Test
+  public void testExecutableBuilder() throws Exception {
+    SpawnAction.Builder builder = builder().addOutput(destinationArtifact);
+    builder.executableArguments().add("binary").add("execArg1").add("execArg2");
+    Action[] actions = builder.build(ActionsTestUtil.NULL_ACTION_OWNER, targetConfig);
+    collectingAnalysisEnvironment.registerAction(actions);
+    SpawnAction action = (SpawnAction) actions[0];
+    assertThat(action.getArguments()).containsExactly("binary", "execArg1", "execArg2");
+  }
+
+  @Test
+  public void testExecutableBuilderAfterSetExecutable() throws Exception {
+    SpawnAction.Builder builder = builder().addOutput(destinationArtifact);
+    builder.setExecutable(PathFragment.create("binary"));
+    builder.executableArguments().add("execArg1").add("execArg2");
+    Action[] actions = builder.build(ActionsTestUtil.NULL_ACTION_OWNER, targetConfig);
+    collectingAnalysisEnvironment.registerAction(actions);
+    SpawnAction action = (SpawnAction) actions[0];
+    assertThat(action.getArguments()).containsExactly("binary", "execArg1", "execArg2");
+  }
+
   private static RunfilesSupplier runfilesSupplier(Artifact manifest, PathFragment dir) {
-    return new RunfilesSupplierImpl(
+    return new SingleRunfilesSupplier(
         dir,
         Runfiles.EMPTY,
         manifest,

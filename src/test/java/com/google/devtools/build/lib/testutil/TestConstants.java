@@ -67,6 +67,9 @@ public class TestConstants {
   /** Location of the bazel repo relative to the workspace root */
   public static final String BAZEL_REPO_PATH = "";
 
+  /** The file path in which to create files so that they end up under Bazel main repository. */
+  public static final String BAZEL_REPO_SCRATCH = "../io_bazel/";
+
   /** Relative path to the {@code process-wrapper} tool. */
   public static final String PROCESS_WRAPPER_PATH =
       "io_bazel/src/main/tools/process-wrapper";
@@ -141,6 +144,10 @@ public class TestConstants {
 
   public static final String PLATFORM_LABEL =
       PLATFORM_PACKAGE_ROOT + ":default_host + " + PLATFORM_PACKAGE_ROOT + ":default_target";
+
+  /** What toolchain type do Android rules use for platform-based toolchain resolution? */
+  public static final String ANDROID_TOOLCHAIN_TYPE_LABEL =
+      TOOLS_REPOSITORY + "//tools/android:sdk_toolchain_type";
 
   /** A choice of test execution mode, only varies internally. */
   public enum InternalTestExecutionMode {

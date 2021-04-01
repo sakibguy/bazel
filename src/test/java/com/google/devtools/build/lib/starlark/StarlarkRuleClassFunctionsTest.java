@@ -55,7 +55,6 @@ import com.google.devtools.build.lib.starlark.util.BazelEvaluationTestCase;
 import com.google.devtools.build.lib.testutil.MoreAsserts;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import javax.annotation.Nullable;
-import net.starlark.java.eval.ClassObject;
 import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Module;
@@ -63,6 +62,7 @@ import net.starlark.java.eval.Mutability;
 import net.starlark.java.eval.Starlark;
 import net.starlark.java.eval.StarlarkInt;
 import net.starlark.java.eval.StarlarkList;
+import net.starlark.java.eval.Structure;
 import net.starlark.java.eval.Tuple;
 import net.starlark.java.syntax.ParserInput;
 import net.starlark.java.syntax.Program;
@@ -81,8 +81,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   private final BazelEvaluationTestCase ev = new BazelEvaluationTestCase();
 
   private StarlarkRuleContext createRuleContext(String label) throws Exception {
-    return new StarlarkRuleContext(
-        getRuleContextForStarlark(getConfiguredTarget(label)), null, getStarlarkSemantics());
+    return new StarlarkRuleContext(getRuleContextForStarlark(getConfiguredTarget(label)), null);
   }
 
   @Override
@@ -214,7 +213,8 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   @Test
   public void testAttrAllowedFileTypesWrongType() throws Exception {
     ev.checkEvalErrorContains(
-        "allow_files should be a boolean or a string list", "attr.label_list(allow_files = 18)");
+        "got value of type 'int', want 'bool, sequence, or NoneType'",
+        "attr.label_list(allow_files = 18)");
   }
 
   @Test
@@ -264,8 +264,9 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     assertThat(ev.getEventCollector()).hasSize(1);
     Event event = ev.getEventCollector().iterator().next();
     assertThat(event.getKind()).isEqualTo(EventKind.ERROR);
+    assertThat(event.getLocation().toString()).isEqualTo(":2:9");
     assertThat(event.getMessage())
-        .matches(":2:9: Attribute r\\.x{150}'s name is too long \\(150 > 128\\)");
+        .matches("Attribute r\\.x{150}'s name is too long \\(150 > 128\\)");
   }
 
   @Test
@@ -495,7 +496,8 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     evalAndExport(
         ev, "def _impl(ctx): pass", "a1 = aspect(_impl, toolchains=['//test:my_toolchain_type'])");
     StarlarkDefinedAspect a = (StarlarkDefinedAspect) ev.lookup("a1");
-    assertThat(a.getRequiredToolchains()).containsExactly(makeLabel("//test:my_toolchain_type"));
+    assertThat(a.getRequiredToolchains())
+        .containsExactly(Label.parseAbsoluteUnchecked("//test:my_toolchain_type"));
   }
 
   @Test
@@ -804,6 +806,27 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   }
 
   @Test
+  public void unknownRuleAttributeFlags_forbidden() throws Exception {
+    ev.setFailFast(false);
+    evalAndExport(
+        ev,
+        "def _impl(ctx): return None",
+        "r1 = rule(_impl, attrs = { 'srcs': attr.label_list(flags = ['NO-SUCH-FLAG']) })");
+    ev.assertContainsError("unknown attribute flag 'NO-SUCH-FLAG'");
+  }
+
+  @Test
+  public void duplicateRuleAttributeFlags_forbidden() throws Exception {
+    ev.setFailFast(false);
+    evalAndExport(
+        ev,
+        "def _impl(ctx): return None",
+        "r1 = rule(_impl, attrs = { 'srcs': attr.label_list(mandatory = True,",
+        "                                                   flags = ['MANDATORY']) })");
+    ev.assertContainsError("'MANDATORY' flag is already set");
+  }
+
+  @Test
   public void testRuleOutputs() throws Exception {
     evalAndExport(
         ev,
@@ -982,6 +1005,12 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     checkTextMessage("struct(name=[]).to_proto()"); // empty lines
     checkTextMessage("struct(name=['a', 'b']).to_proto()", "name: \"a\"", "name: \"b\"");
     checkTextMessage("struct(name=123).to_proto()", "name: 123");
+    checkTextMessage(
+        "struct(a=1.2e34, b=float('nan'), c=float('-inf')).to_proto()",
+        "a: 1.2e+34",
+        "b: nan",
+        "c: -inf");
+    checkTextMessage("struct(name=123).to_proto()", "name: 123");
     checkTextMessage("struct(name=[1, 2, 3]).to_proto()", "name: 1", "name: 2", "name: 3");
     checkTextMessage("struct(a=struct(b='b')).to_proto()", "a {", "  b: \"b\"", "}");
     checkTextMessage(
@@ -1059,24 +1088,51 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   }
 
   @Test
-  public void testTextMessageInvalidElementInListStructure() throws Exception {
-    ev.checkEvalErrorContains(
-        "Invalid text format, expected a struct, a dict, a string, a bool, or "
-            + "an int but got a list for list element in struct field 'a'",
-        "struct(a=[['b']]).to_proto()");
-  }
-
-  @Test
   public void testTextMessageInvalidStructure() throws Exception {
+    // list in list
     ev.checkEvalErrorContains(
-        "Invalid text format, expected a struct, a dict, a string, a bool, or an int "
-            + "but got a function for struct field 'a'",
+        "in struct field .a: at list index 0: got list, want string, int, bool, or struct",
+        "struct(a=[['b']]).to_proto()");
+
+    // dict in list
+    ev.checkEvalErrorContains(
+        "in struct field .a: at list index 0: got dict, want string, int, bool, or struct",
+        "struct(a=[{'b': 1}]).to_proto()");
+
+    // tuple as dict key
+    ev.checkEvalErrorContains(
+        "in struct field .a: invalid dict key: got tuple, want int or string",
+        "struct(a={(1, 2): 3}).to_proto()");
+
+    // dict in dict
+    ev.checkEvalErrorContains(
+        "in struct field .name: in value for dict key \"a\": got dict, want string, int, bool, or"
+            + " struct",
+        "struct(name={'a': {'b': [1, 2]}}).to_proto()");
+
+    // callable in field
+    ev.checkEvalErrorContains(
+        "in struct field .a: got builtin_function_or_method, want string, int, bool, or struct",
         "struct(a=rule).to_proto()");
   }
 
   private void checkJson(String from, String expected) throws Exception {
     Object result = ev.eval(from);
     assertThat(result).isEqualTo(expected);
+  }
+
+  @Test
+  public void testStarlarkJsonModule() throws Exception {
+    // struct.to_json is deprecated.
+    // java.starlark.net's json module is its replacement.
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=false");
+    checkJson("json.encode(struct(name=True))", "{\"name\":true}");
+    checkJson("json.encode([1, 2])", "[1,2]"); // works for non-structs too
+    checkJson("str(dir(struct()))", "[\"to_json\", \"to_proto\"]");
+
+    setBuildLanguageOptions("--incompatible_struct_has_no_methods=true");
+    ev.checkEvalErrorContains("no field or method 'to_json'", "struct(name=True).to_json()");
+    checkJson("str(dir(struct()))", "[]"); // no to_{json,proto}
   }
 
   @Test
@@ -1132,15 +1188,14 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   public void testJsonInvalidStructure() throws Exception {
     ev.checkEvalErrorContains(
         "Invalid text format, expected a struct, a string, a bool, or an int but got a "
-            + "function for struct field 'a'",
+            + "builtin_function_or_method for struct field 'a'",
         "struct(a=rule).to_json()");
   }
 
   @Test
   public void testLabelAttrWrongDefault() throws Exception {
     ev.checkEvalErrorContains(
-        "got value of type 'int', want 'Label or string or LateBoundDefault or function or"
-            + " NoneType'",
+        "got value of type 'int', want 'Label, string, LateBoundDefault, function, or NoneType'",
         "attr.label(default = 123)");
   }
 
@@ -1162,16 +1217,20 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
   public void testStructCreation() throws Exception {
     // TODO(fwe): cannot be handled by current testing suite
     ev.exec("x = struct(a = 1, b = 2)");
-    assertThat(ev.lookup("x")).isInstanceOf(ClassObject.class);
+    assertThat(ev.lookup("x")).isInstanceOf(Structure.class);
   }
 
   @Test
   public void testStructFields() throws Exception {
     // TODO(fwe): cannot be handled by current testing suite
     ev.exec("x = struct(a = 1, b = 2)");
-    ClassObject x = (ClassObject) ev.lookup("x");
+    Structure x = (Structure) ev.lookup("x");
     assertThat(x.getValue("a")).isEqualTo(StarlarkInt.of(1));
     assertThat(x.getValue("b")).isEqualTo(StarlarkInt.of(2));
+
+    // Update is prohibited.
+    ev.checkEvalErrorContains(
+        "struct value does not support field assignment", "x = struct(a = 1); x.a = 2");
   }
 
   @Test
@@ -1197,10 +1256,14 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testStructIncomparability() throws Exception {
-    ev.checkEvalErrorContains("Cannot compare structs", "struct(a = 1) < struct(a = 2)");
-    ev.checkEvalErrorContains("Cannot compare structs", "struct(a = 1) > struct(a = 2)");
-    ev.checkEvalErrorContains("Cannot compare structs", "struct(a = 1) <= struct(a = 2)");
-    ev.checkEvalErrorContains("Cannot compare structs", "struct(a = 1) >= struct(a = 2)");
+    ev.checkEvalErrorContains(
+        "unsupported comparison: struct <=> struct", "struct(a = 1) < struct(a = 2)");
+    ev.checkEvalErrorContains(
+        "unsupported comparison: struct <=> struct", "struct(a = 1) > struct(a = 2)");
+    ev.checkEvalErrorContains(
+        "unsupported comparison: struct <=> struct", "struct(a = 1) <= struct(a = 2)");
+    ev.checkEvalErrorContains(
+        "unsupported comparison: struct <=> struct", "struct(a = 1) >= struct(a = 2)");
   }
 
   @Test
@@ -1368,13 +1431,15 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
                 StarlarkList.<Object>of(
                     mu,
                     StructProvider.STRUCT.create(
-                        ImmutableMap.<String, Object>of(
-                            "x", Dict.<Object, Object>of(mu, StarlarkInt.of(1), StarlarkInt.of(1))),
-                        "no field '%s'"),
+                        ImmutableMap.<String, Object>of("x", dictOf(mu, 1, 1)), "no field '%s'"),
                     Tuple.of()),
             "b", Tuple.of(),
-            "c", Dict.<Object, Object>of(mu, StarlarkInt.of(2), StarlarkInt.of(2))),
+            "c", dictOf(mu, 2, 2)),
         "no field '%s'");
+  }
+
+  private static Dict<Object, Object> dictOf(@Nullable Mutability mu, int k, int v) {
+    return Dict.<Object, Object>builder().put(StarlarkInt.of(k), StarlarkInt.of(v)).build(mu);
   }
 
   @Test
@@ -1388,12 +1453,12 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
   @Test
   public void testStructMutabilityDeep() throws Exception {
-    assertThat(Starlark.isImmutable(Tuple.<Object>of(makeList(null)))).isTrue();
+    assertThat(Starlark.isImmutable(Tuple.of(makeList(null)))).isTrue();
     assertThat(Starlark.isImmutable(makeStruct("a", makeList(null)))).isTrue();
     assertThat(Starlark.isImmutable(makeBigStruct(null))).isTrue();
 
     Mutability mu = Mutability.create("test");
-    assertThat(Starlark.isImmutable(Tuple.<Object>of(makeList(mu)))).isFalse();
+    assertThat(Starlark.isImmutable(Tuple.of(makeList(mu)))).isFalse();
     assertThat(Starlark.isImmutable(makeStruct("a", makeList(mu)))).isFalse();
     assertThat(Starlark.isImmutable(makeBigStruct(mu))).isFalse();
   }
@@ -1793,7 +1858,8 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
         "def impl(ctx): return None",
         "r1 = rule(impl, toolchains=['//test:my_toolchain_type'])");
     RuleClass c = ((StarlarkRuleFunction) ev.lookup("r1")).getRuleClass();
-    assertThat(c.getRequiredToolchains()).containsExactly(makeLabel("//test:my_toolchain_type"));
+    assertThat(c.getRequiredToolchains())
+        .containsExactly(Label.parseAbsoluteUnchecked("//test:my_toolchain_type"));
   }
 
   @Test
@@ -1809,7 +1875,9 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
         ")");
     RuleClass c = ((StarlarkRuleFunction) ev.lookup("r1")).getRuleClass();
     assertThat(c.getExecutionPlatformConstraints())
-        .containsExactly(makeLabel("//constraint:cv1"), makeLabel("//constraint:cv2"));
+        .containsExactly(
+            Label.parseAbsoluteUnchecked("//constraint:cv1"),
+            Label.parseAbsoluteUnchecked("//constraint:cv2"));
   }
 
   @Test
@@ -1832,10 +1900,12 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
     RuleClass plum = ((StarlarkRuleFunction) ev.lookup("plum")).getRuleClass();
     assertThat(plum.getRequiredToolchains()).isEmpty();
     assertThat(plum.getExecGroups().get("group").requiredToolchains())
-        .containsExactly(makeLabel("//test:my_toolchain_type"));
+        .containsExactly(Label.parseAbsoluteUnchecked("//test:my_toolchain_type"));
     assertThat(plum.getExecutionPlatformConstraints()).isEmpty();
     assertThat(plum.getExecGroups().get("group").execCompatibleWith())
-        .containsExactly(makeLabel("//constraint:cv1"), makeLabel("//constraint:cv2"));
+        .containsExactly(
+            Label.parseAbsoluteUnchecked("//constraint:cv1"),
+            Label.parseAbsoluteUnchecked("//constraint:cv2"));
   }
 
   @Test
@@ -1884,9 +1954,12 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
         "  exec_compatible_with=['//constraint:cv1', '//constraint:cv2'],",
         ")");
     ExecGroup group = ((ExecGroup) ev.lookup("group"));
-    assertThat(group.requiredToolchains()).containsExactly(makeLabel("//test:my_toolchain_type"));
+    assertThat(group.requiredToolchains())
+        .containsExactly(Label.parseAbsoluteUnchecked("//test:my_toolchain_type"));
     assertThat(group.execCompatibleWith())
-        .containsExactly(makeLabel("//constraint:cv1"), makeLabel("//constraint:cv2"));
+        .containsExactly(
+            Label.parseAbsoluteUnchecked("//constraint:cv1"),
+            Label.parseAbsoluteUnchecked("//constraint:cv2"));
   }
 
   @Test
@@ -2006,6 +2079,7 @@ public final class StarlarkRuleClassFunctionsTest extends BuildViewTestCase {
 
     getConfiguredTarget("//r:r");
 
-    ev.assertContainsError("Error in rule: Invalid rule class hasn't been exported by a bzl file");
+    ev.assertContainsError(
+        "Error in unexported rule: Invalid rule class hasn't been exported by a bzl file");
   }
 }

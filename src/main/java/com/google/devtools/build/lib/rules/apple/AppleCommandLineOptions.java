@@ -16,7 +16,6 @@ package com.google.devtools.build.lib.rules.apple;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
-import com.google.devtools.build.lib.analysis.config.CoreOptionConverters.DefaultLabelConverter;
 import com.google.devtools.build.lib.analysis.config.CoreOptionConverters.LabelConverter;
 import com.google.devtools.build.lib.analysis.config.FragmentOptions;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -333,15 +332,6 @@ public class AppleCommandLineOptions extends FragmentOptions {
   public List<String> catalystCpus;
 
   @Option(
-    name = "default_ios_provisioning_profile",
-    defaultValue = "",
-    documentationCategory = OptionDocumentationCategory.SIGNING,
-    effectTags = {OptionEffectTag.CHANGES_INPUTS},
-    converter = DefaultProvisioningProfileConverter.class
-  )
-  public Label defaultProvisioningProfile;
-
-  @Option(
     name = "xcode_version_config",
     defaultValue = "@local_config_xcode//:host_xcodes",
     converter = LabelConverter.class,
@@ -353,6 +343,21 @@ public class AppleCommandLineOptions extends FragmentOptions {
   )
   public Label xcodeVersionConfig;
 
+  @Option(
+      name = "experimental_include_xcode_execution_requirements",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.TOOLCHAIN,
+      effectTags = {
+        OptionEffectTag.LOSES_INCREMENTAL_STATE,
+        OptionEffectTag.LOADING_AND_ANALYSIS,
+        OptionEffectTag.EXECUTION
+      },
+      help =
+          "If set, add a \"requires-xcode:{version}\" execution requirement to every Xcode action."
+              + "  If the xcode version has a hyphenated label,  also add a"
+              + " \"requires-xcode-label:{version_label}\" execution requirement.")
+  public boolean includeXcodeExecutionRequirements;
+
   /**
    * The default label of the build-wide {@code xcode_config} configuration rule. This can be
    * changed from the default using the {@code xcode_version_config} build flag.
@@ -360,13 +365,6 @@ public class AppleCommandLineOptions extends FragmentOptions {
   // TODO(cparsons): Update all callers to reference the actual xcode_version_config flag value.
   @VisibleForTesting
   public static final String DEFAULT_XCODE_VERSION_CONFIG_LABEL = "//tools/objc:host_xcodes";
-
-  /** Converter for --default_ios_provisioning_profile. */
-  public static class DefaultProvisioningProfileConverter extends DefaultLabelConverter {
-    public DefaultProvisioningProfileConverter() {
-      super("//tools/objc:default_provisioning_profile");
-    }
-  }
 
   @Option(
       name = "apple_bitcode",
@@ -477,7 +475,6 @@ public class AppleCommandLineOptions extends FragmentOptions {
     host.watchOsSdkVersion = watchOsSdkVersion;
     host.tvOsSdkVersion = tvOsSdkVersion;
     host.macOsSdkVersion = macOsSdkVersion;
-    host.appleBitcodeMode = appleBitcodeMode;
     // The host apple platform type will always be MACOS, as no other apple platform type can
     // currently execute build actions. If that were the case, a host_apple_platform_type flag might
     // be needed.

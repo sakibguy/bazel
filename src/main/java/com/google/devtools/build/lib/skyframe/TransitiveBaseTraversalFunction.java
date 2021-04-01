@@ -18,10 +18,10 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
-import com.google.devtools.build.lib.actions.InconsistentFilesystemException;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.cmdline.PackageIdentifier;
 import com.google.devtools.build.lib.events.EventHandler;
+import com.google.devtools.build.lib.io.InconsistentFilesystemException;
 import com.google.devtools.build.lib.packages.AdvertisedProviderSet;
 import com.google.devtools.build.lib.packages.Aspect;
 import com.google.devtools.build.lib.packages.AspectDefinition;
@@ -76,7 +76,7 @@ public abstract class TransitiveBaseTraversalFunction<ProcessedTargetsT> impleme
    */
   abstract SkyKey getKey(Label label);
 
-  abstract ProcessedTargetsT processTarget(Label label, TargetAndErrorIfAny targetAndErrorIfAny);
+  abstract ProcessedTargetsT processTarget(TargetAndErrorIfAny targetAndErrorIfAny);
 
   abstract void processDeps(
       ProcessedTargetsT processedTargets,
@@ -133,7 +133,7 @@ public abstract class TransitiveBaseTraversalFunction<ProcessedTargetsT> impleme
       return null;
     }
 
-    ProcessedTargetsT processedTargets = processTarget(label, targetAndErrorIfAny);
+    ProcessedTargetsT processedTargets = processTarget(targetAndErrorIfAny);
     processDeps(processedTargets, env.getListener(), targetAndErrorIfAny, depMap.entrySet());
     processDeps(processedTargets, env.getListener(), targetAndErrorIfAny, labelAspectEntries);
 
@@ -278,8 +278,7 @@ public abstract class TransitiveBaseTraversalFunction<ProcessedTargetsT> impleme
       // a new BUILD file appearing in the hierarchy.
       PathFragment containingDirectory = getContainingDirectory(label);
       PackageIdentifier newPkgId =
-          PackageIdentifier.create(
-              label.getPackageIdentifier().getRepository(), containingDirectory);
+          PackageIdentifier.create(label.getRepository(), containingDirectory);
       ContainingPackageLookupValue containingPackageLookupValue;
       try {
         containingPackageLookupValue =

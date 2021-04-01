@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.google.devtools.build.lib.starlark;
 
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static com.google.devtools.build.lib.analysis.OutputGroupInfo.INTERNAL_SUFFIX;
@@ -51,6 +52,7 @@ import com.google.devtools.build.lib.server.FailureDetails.Analysis.Code;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.skyframe.AspectValueKey.AspectKey;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
+import com.google.devtools.build.lib.vfs.Path;
 import net.starlark.java.eval.Sequence;
 import net.starlark.java.eval.StarlarkInt;
 import org.junit.Before;
@@ -432,10 +434,19 @@ public class StarlarkDefinedAspectsTest extends AnalysisTestCase {
     assertThat(outputGroupInfo).isNotNull();
     NestedSet<Artifact> names = outputGroupInfo.getOutputGroup("my_result");
     assertThat(names.toList()).isNotEmpty();
-    NestedSet<Artifact> expectedSet =
+
+    // Configuration of the true Artifact may diverge slightly (e.g. be trimmed) causing owners to
+    // also diverge so just compare paths instead of the whole Artifact.
+    ImmutableList<Path> paths =
+        names.toList().stream().map(Artifact::getPath).collect(toImmutableList());
+    ImmutableList<Path> expectedPaths =
         OutputGroupInfo.get(getConfiguredTarget("//test:xxx"))
-            .getOutputGroup(OutputGroupInfo.HIDDEN_TOP_LEVEL);
-    assertThat(names.toList()).containsExactlyElementsIn(expectedSet.toList());
+            .getOutputGroup(OutputGroupInfo.HIDDEN_TOP_LEVEL)
+            .toList()
+            .stream()
+            .map(Artifact::getPath)
+            .collect(toImmutableList());
+    assertThat(paths).containsExactlyElementsIn(expectedPaths);
   }
 
   @Test
@@ -464,10 +475,19 @@ public class StarlarkDefinedAspectsTest extends AnalysisTestCase {
     assertThat(outputGroupInfo).isNotNull();
     NestedSet<Artifact> names = outputGroupInfo.getOutputGroup("my_result");
     assertThat(names.toList()).isNotEmpty();
-    NestedSet<Artifact> expectedSet =
+
+    // Configuration of the true Artifact may diverge slightly (e.g. be trimmed) causing owners to
+    // also diverge so just compare paths instead of the whole Artifact.
+    ImmutableList<Path> paths =
+        names.toList().stream().map(Artifact::getPath).collect(toImmutableList());
+    ImmutableList<Path> expectedPaths =
         OutputGroupInfo.get(getConfiguredTarget("//test:xxx"))
-            .getOutputGroup(OutputGroupInfo.HIDDEN_TOP_LEVEL);
-    assertThat(names.toList()).containsExactlyElementsIn(expectedSet.toList());
+            .getOutputGroup(OutputGroupInfo.HIDDEN_TOP_LEVEL)
+            .toList()
+            .stream()
+            .map(Artifact::getPath)
+            .collect(toImmutableList());
+    assertThat(paths).containsExactlyElementsIn(expectedPaths);
   }
 
   @Test
@@ -560,6 +580,33 @@ public class StarlarkDefinedAspectsTest extends AnalysisTestCase {
     assertContainsEvent(
         "Error in label_list: Aspects should be top-level values in extension files that define"
             + " them.");
+  }
+
+  @Test
+  @SuppressWarnings("EmptyCatchBlock")
+  public void aspectReturnsNonExportedProvider() throws Exception {
+    scratch.file(
+        "test/inc.bzl",
+        "a = aspect(implementation = lambda target, ctx: [provider()()])",
+        "r = rule(",
+        "  implementation = lambda ctx: [],",
+        "  attrs = {'a': attr.label_list(aspects = [a])})");
+    scratch.file(
+        "test/BUILD",
+        "load('//test:inc.bzl', 'r')",
+        "java_library(name = 'j')",
+        "r(name = 'test', a = [':j'])");
+
+    reporter.removeHandler(failFastHandler);
+    try {
+      update("//test");
+      /* reached if --keep_going=true */
+    } catch (ViewCreationFailedException unused) {
+      /* reached if --keep_going=false */
+    }
+    assertContainsEvent(
+        "aspect function returned an instance of a provider "
+            + "(defined at /workspace/test/inc.bzl:1:58) that is not a global");
   }
 
   @Test

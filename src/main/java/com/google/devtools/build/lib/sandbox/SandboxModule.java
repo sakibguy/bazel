@@ -60,11 +60,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.Nullable;
 
-/**
- * This module provides the Sandbox spawn strategy.
- */
+/** This module provides the Sandbox spawn strategy. */
 public final class SandboxModule extends BlazeModule {
 
   private static final GoogleLogger logger = GoogleLogger.forEnclosingClass();
@@ -101,8 +100,8 @@ public final class SandboxModule extends BlazeModule {
   @Nullable private TreeDeleter treeDeleter;
 
   /**
-   * Whether to remove the sandbox worker directories after a build or not. Useful for debugging
-   * to inspect the state of files on failures.
+   * Whether to remove the sandbox worker directories after a build or not. Useful for debugging to
+   * inspect the state of files on failures.
    */
   private boolean shouldCleanupSandboxBase;
 
@@ -171,7 +170,7 @@ public final class SandboxModule extends BlazeModule {
    * @return true if windows-sandbox can and should be used; false otherwise
    * @throws IOException if there are problems trying to determine the status of windows-sandbox
    */
-  private boolean shouldUseWindowsSandbox(TriState requested, PathFragment binary)
+  private static boolean shouldUseWindowsSandbox(TriState requested, PathFragment binary)
       throws IOException {
     switch (requested) {
       case AUTO:
@@ -329,9 +328,12 @@ public final class SandboxModule extends BlazeModule {
             "docker");
       }
     } else if (options.dockerVerbose) {
-      cmdEnv.getReporter().handle(Event.info(
-          "Docker sandboxing disabled. Use the '--experimental_enable_docker_sandbox' command "
-          + "line option to enable it"));
+      cmdEnv
+          .getReporter()
+          .handle(
+              Event.info(
+                  "Docker sandboxing disabled. Use the '--experimental_enable_docker_sandbox'"
+                      + " command line option to enable it"));
     }
 
     // This is the preferred sandboxing strategy on Linux.
@@ -424,9 +426,15 @@ public final class SandboxModule extends BlazeModule {
     return null;
   }
 
-  private static SpawnRunner withFallback(CommandEnvironment env, SpawnRunner sandboxSpawnRunner) {
-    return new SandboxFallbackSpawnRunner(
-        sandboxSpawnRunner, createFallbackRunner(env), env.getReporter());
+  private static SpawnRunner withFallback(
+      CommandEnvironment env, AbstractSandboxSpawnRunner sandboxSpawnRunner) {
+    SandboxOptions sandboxOptions = env.getOptions().getOptions(SandboxOptions.class);
+    if (sandboxOptions != null && sandboxOptions.legacyLocalFallback) {
+      return new SandboxFallbackSpawnRunner(
+          sandboxSpawnRunner, createFallbackRunner(env), env.getReporter());
+    } else {
+      return sandboxSpawnRunner;
+    }
   }
 
   private static SpawnRunner createFallbackRunner(CommandEnvironment env) {
@@ -446,15 +454,16 @@ public final class SandboxModule extends BlazeModule {
   private static final class SandboxFallbackSpawnRunner implements SpawnRunner {
     private final SpawnRunner sandboxSpawnRunner;
     private final SpawnRunner fallbackSpawnRunner;
-    private final ExtendedEventHandler extendedEventHandler;
+    private final ExtendedEventHandler reporter;
+    private static final AtomicBoolean warningEmitted = new AtomicBoolean();
 
     SandboxFallbackSpawnRunner(
         SpawnRunner sandboxSpawnRunner,
         SpawnRunner fallbackSpawnRunner,
-        ExtendedEventHandler extendedEventHandler) {
+        ExtendedEventHandler reporter) {
       this.sandboxSpawnRunner = sandboxSpawnRunner;
       this.fallbackSpawnRunner = fallbackSpawnRunner;
-      this.extendedEventHandler = extendedEventHandler;
+      this.reporter = reporter;
     }
 
     @Override
@@ -470,10 +479,15 @@ public final class SandboxModule extends BlazeModule {
       if (sandboxSpawnRunner.canExec(spawn)) {
         spawnResult = sandboxSpawnRunner.exec(spawn, context);
       } else {
+        if (warningEmitted.compareAndSet(false, true)) {
+          reporter.handle(
+              Event.warn(
+                  "Use of implicit local fallback will go away soon, please"
+                      + " set a fallback strategy instead. See --legacy_local_fallback option."));
+        }
         spawnResult = fallbackSpawnRunner.exec(spawn, context);
       }
-      extendedEventHandler.post(
-          new SpawnExecutedEvent(spawn, spawnResult, spawnExecutionStartInstant));
+      reporter.post(new SpawnExecutedEvent(spawn, spawnResult, spawnExecutionStartInstant));
       return spawnResult;
     }
 
@@ -490,7 +504,9 @@ public final class SandboxModule extends BlazeModule {
     @Override
     public void cleanupSandboxBase(Path sandboxBase, TreeDeleter treeDeleter) throws IOException {
       sandboxSpawnRunner.cleanupSandboxBase(sandboxBase, treeDeleter);
-      fallbackSpawnRunner.cleanupSandboxBase(sandboxBase, treeDeleter);
+      if (fallbackSpawnRunner != null) {
+        fallbackSpawnRunner.cleanupSandboxBase(sandboxBase, treeDeleter);
+      }
     }
   }
 
@@ -619,7 +635,7 @@ public final class SandboxModule extends BlazeModule {
   }
 
   @Override
-  public void blazeShutdownOnCrash() {
+  public void blazeShutdownOnCrash(DetailedExitCode exitCode) {
     commonShutdown();
   }
 }

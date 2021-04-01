@@ -5,16 +5,13 @@ title: Windows
 
 # Using Bazel on Windows
 
-<a name="install"></a>
-## Installation
-
-See [Install Bazel on Windows](install-windows.html) for installation
-instructions.
+This page covers Best Practices for using Bazel on Windows. For installation
+instructions, see [Install Bazel on Windows](install-windows.html).
 
 ## Known issues
 
-We mark Windows-related Bazel issues on GitHub with the "team-Windows"
-label. [You can see the open issues here.](https://github.com/bazelbuild/bazel/issues?q=is%3Aopen+is%3Aissue+label%3Ateam-Windows)
+Windows-related Bazel issues are marked with the "team-Windows"
+label on GitHub. [You can see the open issues here.](https://github.com/bazelbuild/bazel/issues?q=is%3Aopen+is%3Aissue+label%3Ateam-Windows)
 
 ## Best practices
 
@@ -27,7 +24,7 @@ For example, add the following line to your bazelrc file:
 startup --output_user_root=C:/tmp
 ```
 
-### Enable 8.3 Filename Support
+### Enable 8.3 filename support
 Bazel attempts to create a short name version for long file paths. But to do so the [8.3 filename support](https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil-8dot3name) needs to be enabled for the volume in which the file with the long path resides. You can enable 8.3 name creation in all volumes by running the following command:
 ```
 fsutil 8dot3name set 0
@@ -55,10 +52,10 @@ build --enable_runfiles
 <a name="running-bazel-shells"></a>
 ### Running Bazel: MSYS2 shell vs. command prompt vs. PowerShell
 
-We recommend running Bazel from the command prompt (`cmd.exe`) or from
+**Recommendation:** Run Bazel from the command prompt (`cmd.exe`) or from
 PowerShell.
 
-As of 2020-01-15, we **do not recommend** running Bazel from `bash` -- either
+As of 2020-01-15, **do not** run Bazel from `bash` -- either
 from MSYS2 shell, or Git Bash, or Cygwin, or any other Bash variant. While Bazel
 may work for most use cases, some things are broken, like
 [interrupting the build with Ctrl+C from MSYS2](https://github.com/bazelbuild/bazel/issues/10573)).
@@ -118,9 +115,9 @@ rules that use `ctx.actions.run_shell()` and `ctx.resolve_command()`. This
 applies not only to rules in your project, but to rules in any of the external
 repositories your project depends on (even transitively).
 
-We may explore the option to use Windows Subsystem for Linux (WSL) to build
-these rules, but as of 2020-01-15 it is not a priority for the Bazel-on-Windows
-subteam.
+In the future, there may be an option to use Windows Subsystem for
+Linux (WSL) to build these rules, but currently it is not a priority for
+the Bazel-on-Windows subteam.
 
 ### Setting environment variables
 
@@ -218,8 +215,9 @@ example](https://github.com/bazelbuild/bazel/tree/master/examples/windows/dll).
 From 0.29.0, Bazel supports building with LLVM's MSVC-compatible compiler driver (`clang-cl.exe`).
 
 **Requirement**: To build with Clang, you have to install **both**
-[LLVM](http://releases.llvm.org/download.html) and Visual C++ Build tools, because although we use
-`clang-cl.exe` as compiler, we still need to link to Visual C++ libraries.
+[LLVM](http://releases.llvm.org/download.html) and Visual C++ Build tools,
+because although you use `clang-cl.exe` as compiler, you still need to link to
+Visual C++ libraries.
 
 Bazel can automatically detect LLVM installation on your system, or you can explicitly tell
 Bazel where LLVM is installed by `BAZEL_LLVM`.

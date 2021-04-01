@@ -15,16 +15,18 @@
 package com.google.devtools.build.lib.sandbox;
 
 import com.google.auto.value.AutoValue;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.flogger.GoogleLogger;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.ArtifactExpander;
-import com.google.devtools.build.lib.actions.CommandLines.ParamFileActionInput;
 import com.google.devtools.build.lib.actions.Spawn;
 import com.google.devtools.build.lib.actions.cache.VirtualActionInput;
 import com.google.devtools.build.lib.actions.cache.VirtualActionInput.EmptyActionInput;
 import com.google.devtools.build.lib.analysis.test.TestConfiguration;
+import com.google.devtools.build.lib.vfs.FileSystemUtils;
+import com.google.devtools.build.lib.vfs.FileSystemUtils.MoveResult;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.common.options.OptionsParsingResult;
@@ -36,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Helper methods that are shared by the different sandboxing strategies.
@@ -43,7 +47,9 @@ import java.util.TreeMap;
  * <p>All sandboxed strategies within a build should share the same instance of this object.
  */
 public final class SandboxHelpers {
+  private static final GoogleLogger logger = GoogleLogger.forEnclosingClass();
 
+  private static final AtomicBoolean warnedAboutMovesBeingCopies = new AtomicBoolean(false);
   /**
    * If true, materialize virtual inputs only inside the sandbox, not the output tree. This flag
    * exists purely to support rolling this out as the defaut in a controlled manner.
@@ -85,9 +91,7 @@ public final class SandboxHelpers {
     Path tmpPath = outputPath.getFileSystem().getPath(outputPath.getPathString() + uniqueSuffix);
     tmpPath.getParentDirectory().createDirectoryAndParents();
     try {
-      try (OutputStream outputStream = tmpPath.getOutputStream()) {
-        input.writeTo(outputStream);
-      }
+      writeVirtualInputTo(input, tmpPath);
       // We expect the following to replace the params file atomically in case we are using
       // the dynamic scheduler and we are racing the remote strategy writing this same file.
       tmpPath.renameTo(outputPath);
@@ -104,8 +108,54 @@ public final class SandboxHelpers {
     }
   }
 
+  /**
+   * Moves all given outputs from a root to another.
+   *
+   * <p>This is a support function to help with the implementation of {@link
+   * SandboxfsSandboxedSpawn#copyOutputs(Path)}.
+   *
+   * @param outputs outputs to move as relative paths to a root
+   * @param sourceRoot source directory from which to resolve outputs
+   * @param targetRoot target directory to which to move the resolved outputs from the source
+   * @throws IOException if any of the moves fails
+   */
+  public static void moveOutputs(SandboxOutputs outputs, Path sourceRoot, Path targetRoot)
+      throws IOException {
+    for (PathFragment output : Iterables.concat(outputs.files(), outputs.dirs())) {
+      Path source = sourceRoot.getRelative(output);
+      Path target = targetRoot.getRelative(output);
+      if (source.isFile() || source.isSymbolicLink()) {
+        // Ensure the target directory exists in the target. The directories for the action outputs
+        // have already been created, but the spawn outputs may be different from the overall action
+        // outputs. This is the case for test actions.
+        target.getParentDirectory().createDirectoryAndParents();
+        if (FileSystemUtils.moveFile(source, target).equals(MoveResult.FILE_COPIED)) {
+          if (warnedAboutMovesBeingCopies.compareAndSet(false, true)) {
+            logger.atWarning().log(
+                "Moving files out of the sandbox (e.g. from %s to %s"
+                    + ") had to be done with a file copy, which is detrimental to performance; are "
+                    + "the two trees in different file systems?",
+                source, target);
+          }
+        }
+      } else if (source.isDirectory()) {
+        try {
+          source.renameTo(target);
+        } catch (IOException e) {
+          // Failed to move directory directly, thus move it recursively.
+          target.createDirectory();
+          FileSystemUtils.moveTreesBelow(source, target);
+        }
+      }
+    }
+  }
+
   /** Wrapper class for the inputs of a sandbox. */
   public static final class SandboxInputs {
+
+    private static final AtomicInteger tempFileUniquifierForVirtualInputWrites =
+        new AtomicInteger();
+
     private final Map<PathFragment, Path> files;
     private final Set<VirtualActionInput> virtualInputs;
     private final Map<PathFragment, PathFragment> symlinks;
@@ -130,36 +180,39 @@ public final class SandboxHelpers {
     /**
      * Materializes a single virtual input inside the given execroot.
      *
+     * <p>When materializing inputs under a new sandbox exec root, we can expect the input to not
+     * exist, but we cannot make the same assumption for the non-sandboxed exec root therefore, we
+     * may need to delete existing files.
+     *
      * @param input virtual input to materialize
      * @param execroot path to the execroot under which to materialize the virtual input
-     * @param needsDelete whether to attempt to delete a previous instance of this virtual input.
-     *     When materializing under a new sandbox execroot, we can expect the input to not exist,
-     *     but we cannot make the same assumption for the non-sandboxed execroot.
+     * @param isExecRootSandboxed whether the execroot is sandboxed.
      * @throws IOException if the virtual input cannot be materialized
      */
     private static void materializeVirtualInput(
-        VirtualActionInput input, Path execroot, boolean needsDelete) throws IOException {
-      if (input instanceof ParamFileActionInput) {
-        ParamFileActionInput paramFileInput = (ParamFileActionInput) input;
-        Path outputPath = execroot.getRelative(paramFileInput.getExecPath());
-        if (needsDelete) {
-          if (outputPath.exists()) {
-            outputPath.delete();
-          }
-
-          outputPath.getParentDirectory().createDirectoryAndParents();
-          try (OutputStream outputStream = outputPath.getOutputStream()) {
-            paramFileInput.writeTo(outputStream);
-          }
-        } else {
-          atomicallyWriteVirtualInput(paramFileInput, outputPath, ".sandbox");
-        }
-      } else {
+        VirtualActionInput input, Path execroot, boolean isExecRootSandboxed) throws IOException {
+      if (input instanceof EmptyActionInput) {
         // TODO(b/150963503): We can turn this into an unreachable code path when the old
-        // !delayVirtualInputMaterialization code path is deleted.
-        // TODO(ulfjack): Handle all virtual inputs, e.g., by writing them to a file.
-        Preconditions.checkState(input instanceof EmptyActionInput);
+        //  !delayVirtualInputMaterialization code path is deleted.
+        return;
       }
+
+      Path outputPath = execroot.getRelative(input.getExecPath());
+      if (isExecRootSandboxed) {
+        atomicallyWriteVirtualInput(
+            input,
+            outputPath,
+            // When 2 actions try to atomically create the same virtual input, they need to have a
+            // different suffix for the temporary file in order to avoid racy write to the same one.
+            ".sandbox" + tempFileUniquifierForVirtualInputWrites.incrementAndGet());
+        return;
+      }
+
+      if (outputPath.exists()) {
+        outputPath.delete();
+      }
+      outputPath.getParentDirectory().createDirectoryAndParents();
+      writeVirtualInputTo(input, outputPath);
     }
 
     /**
@@ -174,9 +227,21 @@ public final class SandboxHelpers {
      */
     public void materializeVirtualInputs(Path sandboxExecRoot) throws IOException {
       for (VirtualActionInput input : virtualInputs) {
-        materializeVirtualInput(input, sandboxExecRoot, /*needsDelete=*/ false);
+        materializeVirtualInput(input, sandboxExecRoot, /*isExecRootSandboxed=*/ false);
       }
     }
+  }
+
+  private static void writeVirtualInputTo(VirtualActionInput input, Path target)
+      throws IOException {
+    try (OutputStream out = target.getOutputStream()) {
+      input.writeTo(out);
+    }
+    // Some of the virtual inputs can be executed, e.g. embedded tools. Setting executable flag for
+    // other is fine since that is only more permissive. Please note that for action outputs (e.g.
+    // file write, where the user can specify executable flag), we will have artifacts which do not
+    // go through this code path.
+    target.setExecutable(true);
   }
 
   /**
@@ -241,7 +306,7 @@ public final class SandboxHelpers {
       } else {
         if (actionInput instanceof VirtualActionInput) {
           SandboxInputs.materializeVirtualInput(
-              (VirtualActionInput) actionInput, execRoot, /*needsDelete=*/ true);
+              (VirtualActionInput) actionInput, execRoot, /* isExecRootSandboxed=*/ true);
         }
 
         if (actionInput.isSymlink()) {

@@ -15,6 +15,7 @@ package com.google.devtools.build.lib.vfs;
 
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.devtools.build.lib.vfs.PathFragment.EMPTY_FRAGMENT;
 import static com.google.devtools.build.lib.vfs.PathFragment.create;
 import static org.junit.Assert.assertThrows;
 
@@ -172,6 +173,9 @@ public class PathFragmentTest {
   public void testGetChildWorks() {
     PathFragment pf = create("../some/path");
     assertThat(pf.getChild("hi")).isEqualTo(create("../some/path/hi"));
+    assertThat(pf.getChild("h\\i")).isEqualTo(create("../some/path/h\\i"));
+    assertThat(create("../some/path").getChild(".hi")).isEqualTo(create("../some/path/.hi"));
+    assertThat(create("../some/path").getChild("..hi")).isEqualTo(create("../some/path/..hi"));
   }
 
   @Test
@@ -261,6 +265,13 @@ public class PathFragmentTest {
     assertThat(create("/foo/").getSegment(0)).isEqualTo("foo");
     assertThat(create("foo").getSegment(0)).isEqualTo("foo");
     assertThat(create("/foo").getSegment(0)).isEqualTo("foo");
+  }
+
+  @Test
+  public void segments() {
+    assertThat(create("/this/is/a/path").segments())
+        .containsExactly("this", "is", "a", "path")
+        .inOrder();
   }
 
   @Test
@@ -541,14 +552,14 @@ public class PathFragmentTest {
     assertThat(create("/a/b").segmentCount()).isEqualTo(2);
     assertThat(create("/a/b/c").segmentCount()).isEqualTo(3);
 
-    assertThat(create("").getSegments()).isEmpty();
-    assertThat(create("a").getSegments()).containsExactly("a").inOrder();
-    assertThat(create("a/b").getSegments()).containsExactly("a", "b").inOrder();
-    assertThat(create("a/b/c").getSegments()).containsExactly("a", "b", "c").inOrder();
-    assertThat(create("/").getSegments()).isEmpty();
-    assertThat(create("/a").getSegments()).containsExactly("a").inOrder();
-    assertThat(create("/a/b").getSegments()).containsExactly("a", "b").inOrder();
-    assertThat(create("/a/b/c").getSegments()).containsExactly("a", "b", "c").inOrder();
+    assertThat(create("").splitToListOfSegments()).isEmpty();
+    assertThat(create("a").splitToListOfSegments()).containsExactly("a").inOrder();
+    assertThat(create("a/b").splitToListOfSegments()).containsExactly("a", "b").inOrder();
+    assertThat(create("a/b/c").splitToListOfSegments()).containsExactly("a", "b", "c").inOrder();
+    assertThat(create("/").splitToListOfSegments()).isEmpty();
+    assertThat(create("/a").splitToListOfSegments()).containsExactly("a").inOrder();
+    assertThat(create("/a/b").splitToListOfSegments()).containsExactly("a", "b").inOrder();
+    assertThat(create("/a/b/c").splitToListOfSegments()).containsExactly("a", "b", "c").inOrder();
 
     assertThat(create("a").getSegment(0)).isEqualTo("a");
     assertThat(create("a/b").getSegment(0)).isEqualTo("a");
@@ -596,5 +607,44 @@ public class PathFragmentTest {
     PathFragment a2 =
         (PathFragment) TestUtils.fromBytes(new DeserializationContext(ImmutableMap.of()), sa);
     assertThat(a2).isEqualTo(a);
+  }
+
+  @Test
+  public void containsUplevelReference_emptyPath_returnsFalse() {
+    assertThat(EMPTY_FRAGMENT.containsUplevelReferences()).isFalse();
+  }
+
+  @Test
+  public void containsUplevelReference_uplevelOnlyPath_returnsTrue() {
+    PathFragment pathFragment = create("..");
+    assertThat(pathFragment.containsUplevelReferences()).isTrue();
+  }
+
+  @Test
+  public void containsUplevelReferences_firstSegmentStartingWithDotDot_returnsFalse() {
+    PathFragment pathFragment = create("..file");
+    assertThat(pathFragment.containsUplevelReferences()).isFalse();
+  }
+
+  @Test
+  public void containsUplevelReferences_startsWithUplevelReference_returnsTrue() {
+    PathFragment pathFragment = create("../file");
+    assertThat(pathFragment.containsUplevelReferences()).isTrue();
+  }
+
+  @Test
+  public void containsUplevelReferences_uplevelReferenceMidPath_normalizesAndReturnsFalse() {
+    PathFragment pathFragment = create("a/../b");
+
+    assertThat(pathFragment.containsUplevelReferences()).isFalse();
+    assertThat(pathFragment.getPathString()).isEqualTo("b");
+  }
+
+  @Test
+  public void containsUplevelReferenes_uplevelReferenceMidGlobalPath_normalizesAndReturnsFalse() {
+    PathFragment pathFragment = create("/dir1/dir2/../file");
+
+    assertThat(pathFragment.containsUplevelReferences()).isFalse();
+    assertThat(pathFragment.getPathString()).isEqualTo("/dir1/file");
   }
 }

@@ -19,7 +19,6 @@ import static java.nio.charset.StandardCharsets.ISO_8859_1;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Streams;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.ParamFileInfo;
 import com.google.devtools.build.lib.actions.ParameterFile;
@@ -39,7 +38,6 @@ import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.actions.Substitution;
 import com.google.devtools.build.lib.analysis.actions.Template;
 import com.google.devtools.build.lib.analysis.actions.TemplateExpansionAction;
-import com.google.devtools.build.lib.analysis.test.InstrumentedFilesCollector.InstrumentationSpec;
 import com.google.devtools.build.lib.cmdline.LabelConstants;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.rules.cpp.CcInfo;
@@ -50,7 +48,6 @@ import com.google.devtools.build.lib.rules.python.PythonConfiguration;
 import com.google.devtools.build.lib.rules.python.PythonSemantics;
 import com.google.devtools.build.lib.rules.python.PythonUtils;
 import com.google.devtools.build.lib.rules.python.PythonVersion;
-import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.OS;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import java.io.Serializable;
@@ -67,10 +64,6 @@ public class BazelPythonSemantics implements PythonSemantics {
       new PythonUtils.GetInitPyFiles((Predicate<PathFragment> & Serializable) source -> false);
   private static final Template STUB_TEMPLATE =
       Template.forResource(BazelPythonSemantics.class, "python_stub_template.txt");
-  public static final InstrumentationSpec PYTHON_COLLECTION_SPEC =
-      new InstrumentationSpec(FileTypeSet.of(BazelPyRuleClasses.PYTHON_SOURCE))
-          .withSourceAttributes("srcs")
-          .withDependencyAttributes("deps", "data");
 
   public static final PathFragment ZIP_RUNFILES_DIRECTORY_NAME = PathFragment.create("runfiles");
 
@@ -90,6 +83,11 @@ public class BazelPythonSemantics implements PythonSemantics {
   }
 
   @Override
+  public boolean prohibitHyphensInPackagePaths() {
+    return false;
+  }
+
+  @Override
   public void collectRunfilesForBinary(
       RuleContext ruleContext, Runfiles.Builder builder, PyCommon common, CcInfo ccInfo) {
     addRuntime(ruleContext, common, builder);
@@ -104,11 +102,6 @@ public class BazelPythonSemantics implements PythonSemantics {
   @Override
   public void collectDefaultRunfiles(RuleContext ruleContext, Runfiles.Builder builder) {
     builder.addRunfiles(ruleContext, RunfilesProvider.DEFAULT_RUNFILES);
-  }
-
-  @Override
-  public InstrumentationSpec getCoverageInstrumentationSpec() {
-    return PYTHON_COLLECTION_SPEC;
   }
 
   @Override
@@ -185,8 +178,7 @@ public class BazelPythonSemantics implements PythonSemantics {
                 Substitution.of(
                     "%enable_host_version_warning%",
                     boolToLiteral(common.shouldWarnAboutHostVersionUponFailure())),
-                Substitution.of(
-                    "%target%", ruleContext.getRule().getLabel().getDefaultCanonicalForm()),
+                Substitution.of("%target%", ruleContext.getRule().getLabel().getCanonicalForm()),
                 Substitution.of(
                     "%python_version_from_config%", versionToLiteral(common.getVersion())),
                 Substitution.of("%python_version_from_attr%", versionToLiteral(attrVersion)),
@@ -326,18 +318,19 @@ public class BazelPythonSemantics implements PythonSemantics {
     builder.addOutputGroup("python_zip_file", zipFile);
   }
 
-  private static boolean isUnderWorkspace(PathFragment path) {
-    return !path.startsWith(LabelConstants.EXTERNAL_PATH_PREFIX);
-  }
-
-  private static String getZipRunfilesPath(PathFragment path, PathFragment workspaceName) {
+  private static String getZipRunfilesPath(
+      PathFragment path, PathFragment workspaceName, boolean legacyExternalRunfiles) {
     String zipRunfilesPath;
-    if (isUnderWorkspace(path)) {
-      // If the file is under workspace, add workspace name as prefix
-      zipRunfilesPath = workspaceName.getRelative(path).toString();
-    } else {
-      // If the file is in external package, strip "external"
+    if (legacyExternalRunfiles && path.startsWith(LabelConstants.EXTERNAL_PATH_PREFIX)) {
+      // If the path starts with 'external' and --legacy_external_runfiles is set, this file is in
+      // an external repository. Convert it to the new runfiles path by removing the 'external'
+      // prefix.
       zipRunfilesPath = path.relativeTo(LabelConstants.EXTERNAL_PATH_PREFIX).toString();
+    } else {
+      // If not, it means the runfiles path is either under the workspace or an external file path
+      // in the new runfiles path format. In either case, simply appending it to the workspace name
+      // works just fine.
+      zipRunfilesPath = workspaceName.getRelative(path).toString();
     }
     // We put the whole runfiles tree under the ZIP_RUNFILES_DIRECTORY_NAME directory, by doing this
     // , we avoid the conflict between default workspace name "__main__" and __main__.py file.
@@ -345,8 +338,9 @@ public class BazelPythonSemantics implements PythonSemantics {
     return ZIP_RUNFILES_DIRECTORY_NAME.getRelative(zipRunfilesPath).toString();
   }
 
-  private static String getZipRunfilesPath(String path, PathFragment workspaceName) {
-    return getZipRunfilesPath(PathFragment.create(path), workspaceName);
+  private static String getZipRunfilesPath(
+      String path, PathFragment workspaceName, boolean legacyExternalRunfiles) {
+    return getZipRunfilesPath(PathFragment.create(path), workspaceName, legacyExternalRunfiles);
   }
 
   private static void createPythonZipAction(
@@ -362,12 +356,14 @@ public class BazelPythonSemantics implements PythonSemantics {
     CustomCommandLine.Builder argv = new CustomCommandLine.Builder();
     inputsBuilder.add(stubFile);
     argv.addPrefixedExecPath("__main__.py=", stubFile);
+    boolean legacyExternalRunfiles = ruleContext.getConfiguration().legacyExternalRunfiles();
 
     // Creating __init__.py files under each directory
     argv.add("__init__.py=");
-    argv.addDynamicString(getZipRunfilesPath("__init__.py", workspaceName) + "=");
+    argv.addDynamicString(
+        getZipRunfilesPath("__init__.py", workspaceName, legacyExternalRunfiles) + "=");
     for (String path : runfilesSupport.getRunfiles().getEmptyFilenames().toList()) {
-      argv.addDynamicString(getZipRunfilesPath(path, workspaceName) + "=");
+      argv.addDynamicString(getZipRunfilesPath(path, workspaceName, legacyExternalRunfiles) + "=");
     }
 
     // Read each runfile from execute path, add them into zip file at the right runfiles path.
@@ -375,7 +371,7 @@ public class BazelPythonSemantics implements PythonSemantics {
     for (Artifact artifact : runfilesSupport.getRunfilesArtifacts().toList()) {
       if (!artifact.equals(executable) && !artifact.equals(zipFile)) {
         argv.addDynamicString(
-            getZipRunfilesPath(artifact.getRunfilesPath(), workspaceName)
+            getZipRunfilesPath(artifact.getRunfilesPath(), workspaceName, legacyExternalRunfiles)
                 + "="
                 + artifact.getExecPathString());
         inputsBuilder.add(artifact);
@@ -461,7 +457,7 @@ public class BazelPythonSemantics implements PythonSemantics {
         ImmutableList.<CcInfo>builder()
             .addAll(AnalysisUtils.getProviders(deps, CcInfo.PROVIDER))
             .addAll(
-                Streams.stream(AnalysisUtils.getProviders(deps, PyCcLinkParamsProvider.PROVIDER))
+                AnalysisUtils.getProviders(deps, PyCcLinkParamsProvider.PROVIDER).stream()
                     .map(PyCcLinkParamsProvider::getCcInfo)
                     .collect(ImmutableList.toImmutableList()))
             .build();

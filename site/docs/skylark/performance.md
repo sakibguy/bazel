@@ -1,9 +1,11 @@
 ---
 layout: documentation
 title: Optimizing performance
+category: extending
 ---
 
-# Optimizing performance
+# Optimizing Performance
+
 
 When writing rules, the most common performance pitfall is to traverse or copy
 data that is accumulated from dependencies. When aggregated over the whole
@@ -323,7 +325,7 @@ $ bazel analyze-profile /tmp/prof
 ```
 
 By default, it prints summary analysis information for the specified profile
-datafile. This includes cummaltive statistics for different task types for each
+datafile. This includes cumulative statistics for different task types for each
 build phase and an analysis of the critical path.
 
 The first section of the default output is an overview of the time spent
@@ -360,7 +362,7 @@ Bazel comes with a built-in memory profiler that can help you check your rule's
 memory use. If there is a problem you can dump the heap to find the
 exact line of code that is causing the problem.
 
-### Enabling Memory Tracking
+### Enabling memory tracking
 
 You must pass these two startup flags to *every* Bazel invocation:
 

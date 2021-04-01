@@ -110,7 +110,7 @@ final class WorkerPool {
   }
 
   private SimpleWorkerPool getPool(WorkerKey key) {
-    if (key.getProxied()) {
+    if (key.isMultiplex()) {
       return multiplexPools.getOrDefault(key.getMnemonic(), multiplexPools.get(""));
     } else {
       return workerPools.getOrDefault(key.getMnemonic(), workerPools.get(""));
@@ -189,6 +189,10 @@ final class WorkerPool {
     }
   }
 
+  /**
+   * Closes all the worker pools, destroying the workers in the process. This waits for any
+   * currently-ongoing work to finish.
+   */
   public void close() {
     workerPools.values().forEach(GenericKeyedObjectPool::close);
     multiplexPools.values().forEach(GenericKeyedObjectPool::close);

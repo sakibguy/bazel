@@ -1,9 +1,13 @@
 ---
 layout: documentation
 title: Aspects
+category: extending
 ---
 
 # Aspects
+
+This page explains the basics and benefits of using aspects and provides
+simple and advanced examples.
 
 Aspects allow augmenting build dependency graphs with additional information
 and actions. Some typical scenarios when aspects can be useful:

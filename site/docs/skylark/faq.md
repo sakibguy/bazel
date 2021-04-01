@@ -1,9 +1,10 @@
 ---
 layout: documentation
 title: Extension FAQ
+category: extending
 ---
 
-# Frequently asked questions
+# Frequently Asked Questions
 
 These are some common issues and questions with writing extensions.
 

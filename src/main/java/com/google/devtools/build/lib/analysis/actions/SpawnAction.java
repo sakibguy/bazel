@@ -18,7 +18,6 @@ import static com.google.devtools.build.lib.analysis.ToolchainCollection.DEFAULT
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.CharMatcher;
-import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
@@ -83,7 +82,6 @@ import com.google.errorprone.annotations.DoNotCall;
 import com.google.errorprone.annotations.FormatMethod;
 import com.google.errorprone.annotations.FormatString;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -239,7 +237,7 @@ public class SpawnAction extends AbstractAction implements CommandAction {
   }
 
   @Override
-  public List<String> getArguments() throws CommandLineExpansionException {
+  public List<String> getArguments() throws CommandLineExpansionException, InterruptedException {
     return ImmutableList.copyOf(commandLines.allArguments());
   }
 
@@ -258,7 +256,7 @@ public class SpawnAction extends AbstractAction implements CommandAction {
   }
 
   @Override
-  public Sequence<String> getStarlarkArgv() throws EvalException {
+  public Sequence<String> getStarlarkArgv() throws EvalException, InterruptedException {
     try {
       return StarlarkList.immutableCopyOf(getArguments());
     } catch (CommandLineExpansionException ex) {
@@ -274,13 +272,14 @@ public class SpawnAction extends AbstractAction implements CommandAction {
 
   /** Returns command argument, argv[0]. */
   @VisibleForTesting
-  public String getCommandFilename() throws CommandLineExpansionException {
+  public String getCommandFilename() throws CommandLineExpansionException, InterruptedException {
     return Iterables.getFirst(getArguments(), null);
   }
 
   /** Returns the (immutable) list of arguments, excluding the command name, argv[0]. */
   @VisibleForTesting
-  public List<String> getRemainingArguments() throws CommandLineExpansionException {
+  public List<String> getRemainingArguments()
+      throws CommandLineExpansionException, InterruptedException {
     return ImmutableList.copyOf(Iterables.skip(getArguments(), 1));
   }
 
@@ -321,9 +320,9 @@ public class SpawnAction extends AbstractAction implements CommandAction {
       beforeExecute(actionExecutionContext);
       spawn = getSpawn(actionExecutionContext);
     } catch (ExecException e) {
-      throw toActionExecutionException(e);
+      throw e.toActionExecutionException(this);
     } catch (CommandLineExpansionException e) {
-      throw createDetailedException(e, Code.COMMAND_LINE_EXPANSION_FAILURE);
+      throw createCommandLineException(e);
     }
     SpawnContinuation spawnContinuation =
         actionExecutionContext
@@ -332,50 +331,15 @@ public class SpawnAction extends AbstractAction implements CommandAction {
     return new SpawnActionContinuation(actionExecutionContext, spawnContinuation);
   }
 
-  private ActionExecutionException createDetailedException(Exception e, Code detailedCode) {
+  private ActionExecutionException createCommandLineException(CommandLineExpansionException e) {
     DetailedExitCode detailedExitCode =
         DetailedExitCode.of(
             FailureDetail.newBuilder()
                 .setMessage(Strings.nullToEmpty(e.getMessage()))
-                .setSpawn(FailureDetails.Spawn.newBuilder().setCode(detailedCode))
+                .setSpawn(
+                    FailureDetails.Spawn.newBuilder().setCode(Code.COMMAND_LINE_EXPANSION_FAILURE))
                 .build());
     return new ActionExecutionException(e, this, /*catastrophe=*/ false, detailedExitCode);
-  }
-
-  private ActionExecutionException toActionExecutionException(ExecException e) {
-    if (!isShellCommand()) {
-      return e.toActionExecutionException(this);
-    }
-    String failMessage;
-    // The possible reasons it could fail are: shell executable not found, shell
-    // exited non-zero, or shell died from signal.  The first is impossible
-    // and the second two aren't very interesting, so in the interests of
-    // keeping the noise-level down, we don't print a reason why, just the
-    // command that failed.
-    //
-    // 0=shell executable, 1=shell command switch, 2=command
-    try {
-      failMessage =
-          "error executing shell command: "
-              + "'"
-              + truncate(Joiner.on(" ").join(getArguments()), 200)
-              + "'";
-    } catch (CommandLineExpansionException commandLineExpansionException) {
-      failMessage =
-          "error executing shell command, and error expanding command line: "
-              + commandLineExpansionException;
-    }
-    return e.toActionExecutionException(failMessage, this);
-  }
-
-  /**
-   * Returns s, truncated to no more than maxLen characters, appending an
-   * ellipsis if truncation occurred.
-   */
-  private static String truncate(String s, int maxLen) {
-    return s.length() > maxLen
-        ? s.substring(0, maxLen - "...".length()) + "..."
-        : s;
   }
 
   /**
@@ -387,17 +351,19 @@ public class SpawnAction extends AbstractAction implements CommandAction {
    * spawn should override the other getSpawn() methods instead.
    */
   @VisibleForTesting
-  public final Spawn getSpawn() throws CommandLineExpansionException {
+  public final Spawn getSpawn() throws CommandLineExpansionException, InterruptedException {
     return getSpawn(getInputs());
   }
 
-  final Spawn getSpawn(NestedSet<Artifact> inputs) throws CommandLineExpansionException {
+  final Spawn getSpawn(NestedSet<Artifact> inputs)
+      throws CommandLineExpansionException, InterruptedException {
     return new ActionSpawn(
         commandLines.allArguments(),
-        ImmutableMap.of(),
+        /*env=*/ ImmutableMap.of(),
+        /*envResolved=*/ false,
         inputs,
-        ImmutableList.of(),
-        ImmutableMap.of());
+        /*additionalInputs=*/ ImmutableList.of(),
+        /*filesetMappings=*/ ImmutableMap.of());
   }
 
   /**
@@ -405,29 +371,40 @@ public class SpawnAction extends AbstractAction implements CommandAction {
    * client environment.
    */
   public Spawn getSpawn(ActionExecutionContext actionExecutionContext)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     return getSpawn(
         actionExecutionContext.getArtifactExpander(),
         actionExecutionContext.getClientEnv(),
+        /*envResolved=*/ false,
         actionExecutionContext.getTopLevelFilesets());
   }
 
+  /**
+   * Return a spawn that is representative of the command that this Action will execute in the given
+   * environment.
+   *
+   * @param envResolved If set to true, the passed environment variables will be used as the Spawn
+   *     effective environment. Otherwise they will be used as client environment to resolve the
+   *     action env.
+   */
   Spawn getSpawn(
       ArtifactExpander artifactExpander,
-      Map<String, String> clientEnv,
+      Map<String, String> env,
+      boolean envResolved,
       Map<Artifact, ImmutableList<FilesetOutputSymlink>> filesetMappings)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     ExpandedCommandLines expandedCommandLines =
         commandLines.expand(artifactExpander, getPrimaryOutput().getExecPath(), commandLineLimits);
     return new ActionSpawn(
         ImmutableList.copyOf(expandedCommandLines.arguments()),
-        clientEnv,
+        env,
+        envResolved,
         getInputs(),
         expandedCommandLines.getParamFiles(),
         filesetMappings);
   }
 
-  Spawn getSpawnForExtraAction() throws CommandLineExpansionException {
+  Spawn getSpawnForExtraAction() throws CommandLineExpansionException, InterruptedException {
     return getSpawn(getInputs());
   }
 
@@ -436,7 +413,7 @@ public class SpawnAction extends AbstractAction implements CommandAction {
       ActionKeyContext actionKeyContext,
       @Nullable ArtifactExpander artifactExpander,
       Fingerprint fp)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     fp.addString(GUID);
     commandLines.addToFingerprint(actionKeyContext, artifactExpander, fp);
     fp.addString(getMnemonic());
@@ -476,6 +453,9 @@ public class SpawnAction extends AbstractAction implements CommandAction {
         message.append(argument);
         message.append('\n');
       }
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      message.append("Interrupted while expanding command line\n");
     } catch (CommandLineExpansionException e) {
       message.append("Could not expand command line: ");
       message.append(e);
@@ -499,7 +479,7 @@ public class SpawnAction extends AbstractAction implements CommandAction {
 
   @Override
   public ExtraActionInfo.Builder getExtraActionInfo(ActionKeyContext actionKeyContext)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     ExtraActionInfo.Builder builder = super.getExtraActionInfo(actionKeyContext);
     if (extraActionInfoSupplier == null) {
       SpawnInfo spawnInfo = getExtraActionSpawnInfo();
@@ -517,7 +497,8 @@ public class SpawnAction extends AbstractAction implements CommandAction {
    * <p>Subclasses of SpawnAction may override this in order to provide action-specific behaviour.
    * This can be necessary, for example, when the action discovers inputs.
    */
-  protected SpawnInfo getExtraActionSpawnInfo() throws CommandLineExpansionException {
+  protected SpawnInfo getExtraActionSpawnInfo()
+      throws CommandLineExpansionException, InterruptedException {
     SpawnInfo.Builder info = SpawnInfo.newBuilder();
     Spawn spawn = getSpawnForExtraAction();
     info.addAllArgument(spawn.getArguments());
@@ -570,10 +551,12 @@ public class SpawnAction extends AbstractAction implements CommandAction {
      */
     private ActionSpawn(
         ImmutableList<String> arguments,
-        Map<String, String> clientEnv,
+        Map<String, String> env,
+        boolean envResolved,
         NestedSet<Artifact> inputs,
         Iterable<? extends ActionInput> additionalInputs,
-        Map<Artifact, ImmutableList<FilesetOutputSymlink>> filesetMappings) {
+        Map<Artifact, ImmutableList<FilesetOutputSymlink>> filesetMappings)
+        throws CommandLineExpansionException {
       super(
           arguments,
           ImmutableMap.<String, String>of(),
@@ -591,9 +574,17 @@ public class SpawnAction extends AbstractAction implements CommandAction {
       inputsBuilder.addAll(additionalInputs);
       this.inputs = inputsBuilder.build();
       this.filesetMappings = filesetMappings;
-      LinkedHashMap<String, String> env = new LinkedHashMap<>(SpawnAction.this.env.size());
-      SpawnAction.this.env.resolve(env, clientEnv);
-      effectiveEnvironment = ImmutableMap.copyOf(env);
+
+      /**
+       * If the action environment is already resolved using the client environment, the given
+       * environment variables are used as they are. Otherwise, they are used as clientEnv to
+       * resolve the action environment variables
+       */
+      if (envResolved) {
+        effectiveEnvironment = ImmutableMap.copyOf(env);
+      } else {
+        effectiveEnvironment = SpawnAction.this.getEffectiveEnvironment(env);
+      }
     }
 
     @Override
@@ -992,7 +983,12 @@ public class SpawnAction extends AbstractAction implements CommandAction {
     }
 
     /**
-     * Sets the executable path; the path is interpreted relative to the execution root.
+     * Sets the executable path; the path is interpreted relative to the execution root, unless it's
+     * a bare file name.
+     *
+     * <p><b>Caution</b>: if the executable is a bare file name ("foo"), it will be interpreted
+     * relative to PATH. See https://github.com/bazelbuild/bazel/issues/13189 for details. To avoid
+     * that, use {@link #setExecutable(Artifact)} instead.
      *
      * <p>Calling this method overrides any previous values set via calls to {@link #setExecutable},
      * {@link #setJavaExecutable}, or {@link #setShellCommand}.
@@ -1011,7 +1007,9 @@ public class SpawnAction extends AbstractAction implements CommandAction {
      */
     public Builder setExecutable(Artifact executable) {
       addTool(executable);
-      return setExecutable(executable.getExecPath());
+      this.executableArgs = CustomCommandLine.builder().addCallablePath(executable.getExecPath());
+      this.isShellCommand = false;
+      return this;
     }
 
     /**
@@ -1037,7 +1035,10 @@ public class SpawnAction extends AbstractAction implements CommandAction {
     public Builder setExecutable(FilesToRunProvider executableProvider) {
       Preconditions.checkArgument(executableProvider.getExecutable() != null,
           "The target does not have an executable");
-      setExecutable(executableProvider.getExecutable().getExecPath());
+      this.executableArgs =
+          CustomCommandLine.builder()
+              .addCallablePath(executableProvider.getExecutable().getExecPath());
+      this.isShellCommand = false;
       return addTool(executableProvider);
     }
 
@@ -1046,7 +1047,6 @@ public class SpawnAction extends AbstractAction implements CommandAction {
       this.executableArgs =
           CustomCommandLine.builder()
               .addPath(javaExecutable)
-              .add("-Xverify:none")
               .addAll(ImmutableList.copyOf(jvmArgs))
               .addAll(ImmutableList.copyOf(launchArgs));
       toolsBuilder.add(deployJar);
@@ -1115,7 +1115,9 @@ public class SpawnAction extends AbstractAction implements CommandAction {
 
     /** Returns a {@link CustomCommandLine.Builder} for executable arguments. */
     public CustomCommandLine.Builder executableArguments() {
-      Preconditions.checkState(executableArgs != null);
+      if (executableArgs == null) {
+        executableArgs = CustomCommandLine.builder();
+      }
       return this.executableArgs;
     }
 
@@ -1337,18 +1339,18 @@ public class SpawnAction extends AbstractAction implements CommandAction {
     }
 
     @Override
-    public Iterable<String> arguments() throws CommandLineExpansionException {
+    public Iterable<String> arguments() throws CommandLineExpansionException, InterruptedException {
       return expandArguments(null);
     }
 
     @Override
     public Iterable<String> arguments(ArtifactExpander artifactExpander)
-        throws CommandLineExpansionException {
+        throws CommandLineExpansionException, InterruptedException {
       return expandArguments(artifactExpander);
     }
 
     private Iterable<String> expandArguments(@Nullable ArtifactExpander artifactExpander)
-        throws CommandLineExpansionException {
+        throws CommandLineExpansionException, InterruptedException {
       ImmutableList.Builder<String> result = ImmutableList.builder();
       int count = values.length;
       for (int i = 0; i < count; ++i) {
@@ -1403,7 +1405,7 @@ public class SpawnAction extends AbstractAction implements CommandAction {
         }
         return new SpawnActionContinuation(actionExecutionContext, nextContinuation);
       } catch (ExecException e) {
-        throw toActionExecutionException(e);
+        throw e.toActionExecutionException(SpawnAction.this);
       }
     }
   }

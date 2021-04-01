@@ -5,23 +5,20 @@ title: Migrating from Maven to Bazel
 
 # Migrating from Maven to Bazel
 
+This page describes how to migrate from Maven to Bazel, including the
+prerequisites and installation steps. It describes the differences
+between Maven and Bazel, and provides a migration example using the
+Guava project.
+
 When migrating from any build tool to Bazel, it's best to have both build
 tools running in parallel until you have fully migrated your development team,
 CI system, and any other relevant systems. You can run Maven and Bazel in the
 same repository.
 
-## Table of contents
-
-
-*  [Before you begin](#before-you-begin)
-*  [Differences between Maven and Bazel](#differences-between-maven-and-bazel)
-*  [Migrate from Maven to Bazel:](#migrate-from-maven-to-bazel)
-   *  [1. Create the WORKSPACE file](#1-workspace)
-      *  [Guava project example](#guava-1)
-   *  [2. Create one BUILD file](#2-build)
-      *  [Guava project example](#guava-2)
-   *  [3. Create more BUILD files  (Optional)](#3-build)
-   *  [4. Build using Bazel](#4-build)
+Note that while Bazel supports downloading and publishing Maven artifacts with
+[rules_jvm_external](https://github.com/bazelbuild/rules_jvm_external), it
+does not directly support Maven-based plugins. Maven plugins can't be directly
+run by Bazel since there's no Maven compatibility layer.
 
 ## Before you begin
 
@@ -73,10 +70,10 @@ maintained by the Bazel team.
 
 #### <a name="guava-1"></a>Guava project example: external dependencies
 
-Using the
+You can list the external dependencies of the
+[Guava project](https://github.com/google/guava) with the
 [`rules_jvm_external`](https://github.com/bazelbuild/rules_jvm_external)
-ruleset, we can list the external dependencies of the
-[Guava project](https://github.com/google/guava).
+ruleset.
 
 Add the following snippet to the `WORKSPACE` file:
 
@@ -102,7 +99,6 @@ maven_install(
         "com.google.j2objc:j2objc-annotations:1.1",
     ],
     repositories = [
-        "https://jcenter.bintray.com/",
         "https://repo1.maven.org/maven2",
     ],
 )
@@ -169,8 +165,8 @@ targets.
           )
           ```
     *  Specify the attributes:
-       *  `name`: Give the target a meaningful name. In the examples above
-          we call the target "everything."
+       *  `name`: Give the target a meaningful name. In the examples above,
+          the target is called "everything."
        *  `srcs`: Use globbing to list all .java files in your project.
        *  `resources`: Use globbing to list all resources in your project.
        *  `deps`: You need to determine which external dependencies your
@@ -208,7 +204,7 @@ java_library(
 )
 ```
 
-### <a name="3-build"></a>3. Create more BUILD files (Optional)
+### <a name="3-build"></a>3. Create more BUILD files (optional)
 
 Bazel does work with just one BUILD file, as you saw after completing your first
 build. You should still consider breaking the build into smaller chunks by

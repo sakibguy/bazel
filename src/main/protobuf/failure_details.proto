@@ -163,26 +163,33 @@ message FailureDetail {
   reserved 170 to 171; // For internal use
   reserved 176; // For internal use
   reserved 178; // For internal use
+  reserved 180; // For internal use
 }
 
 message Interrupted {
   enum Code {
-    // Interrupted at an unspecified time.
+    // Unknown interrupt. Avoid using this code, instead use INTERRUPTED.
     INTERRUPTED_UNKNOWN = 0 [(metadata) = { exit_code: 8 }];
-    BUILD = 4 [(metadata) = { exit_code: 8 }];
-    BUILD_COMPLETION = 5 [(metadata) = { exit_code: 8 }];
-    PACKAGE_LOADING_SYNC = 6 [(metadata) = { exit_code: 8 }];
-    EXECUTOR_COMPLETION = 7 [(metadata) = { exit_code: 8 }];
-    COMMAND_DISPATCH = 8 [(metadata) = { exit_code: 8 }];
-    INFO_ITEM = 9 [(metadata) = { exit_code: 8 }];
-    AFTER_QUERY = 10 [(metadata) = { exit_code: 8 }];
-    FETCH_COMMAND = 17 [(metadata) = { exit_code: 8 }];
-    SYNC_COMMAND = 18 [(metadata) = { exit_code: 8 }];
-    CLEAN_COMMAND = 20 [(metadata) = { exit_code: 8 }];
-    MOBILE_INSTALL_COMMAND = 21 [(metadata) = { exit_code: 8 }];
-    QUERY = 22 [(metadata) = { exit_code: 8 }];
-    RUN_COMMAND = 23 [(metadata) = { exit_code: 8 }];
-    OPTIONS_PARSING = 27 [(metadata) = { exit_code: 8 }];
+
+    // Command was interrupted (cancelled).
+    INTERRUPTED = 28 [(metadata) = { exit_code: 8 }];
+
+    // The following more specific interrupt codes have been deprecated and
+    // consolidated into INTERRUPTED.
+    DEPRECATED_BUILD = 4 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_BUILD_COMPLETION = 5 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_PACKAGE_LOADING_SYNC = 6 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_EXECUTOR_COMPLETION = 7 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_COMMAND_DISPATCH = 8 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_INFO_ITEM = 9 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_AFTER_QUERY = 10 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_FETCH_COMMAND = 17 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_SYNC_COMMAND = 18 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_CLEAN_COMMAND = 20 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_MOBILE_INSTALL_COMMAND = 21 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_QUERY = 22 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_RUN_COMMAND = 23 [(metadata) = { exit_code: 8 }];
+    DEPRECATED_OPTIONS_PARSING = 27 [(metadata) = { exit_code: 8 }];
 
     reserved 1 to 3; // For internal use
     reserved 11 to 16; // For internal use
@@ -234,6 +241,7 @@ message ExternalRepository {
   enum Code {
     EXTERNAL_REPOSITORY_UNKNOWN = 0 [(metadata) = { exit_code: 37 }];
     OVERRIDE_DISALLOWED_MANAGED_DIRECTORIES = 1 [(metadata) = { exit_code: 2 }];
+    BAD_DOWNLOADER_CONFIG = 2 [(metadata) = { exit_code: 2 }];
   }
   Code code = 1;
   // Additional data could include external repository names.
@@ -464,6 +472,8 @@ message Filesystem {
     SERVER_FILE_WRITE_FAILURE = 5 [(metadata) = { exit_code: 1 }];
     DEFAULT_DIGEST_HASH_FUNCTION_INVALID_VALUE = 6
         [(metadata) = { exit_code: 2 }];
+
+    reserved 7; // For internal use
   }
 
   Code code = 1;
@@ -565,6 +575,11 @@ message BuildConfiguration {
         [(metadata) = { exit_code: 2 }];
     CYCLE = 9 [(metadata) = { exit_code: 2 }];
     CONFLICTING_CONFIGURATIONS = 10 [(metadata) = { exit_code: 2 }];
+    // This can come from either an invalid user-specified option or a
+    // configuration transition. There's no sure-fire way to distinguish the two
+    // possibilities in Bazel, so we go with the more straightforward
+    // command-line error exit code 2.
+    INVALID_OUTPUT_DIRECTORY_MNEMONIC = 11 [(metadata) = { exit_code: 2 }];
   }
 
   Code code = 1;
@@ -706,7 +721,7 @@ message Sandbox {
     MOUNT_SOURCE_DOES_NOT_EXIST = 7 [(metadata) = { exit_code: 1 }];
     MOUNT_SOURCE_TARGET_TYPE_MISMATCH = 8 [(metadata) = { exit_code: 1 }];
     MOUNT_TARGET_DOES_NOT_EXIST = 9 [(metadata) = { exit_code: 1 }];
-    EXECUTION_FAILED = 10 [(metadata) = { exit_code: 1 }];
+    SUBPROCESS_START_FAILED = 10 [(metadata) = { exit_code: 36 }];
   }
 
   Code code = 1;
@@ -720,12 +735,16 @@ message IncludeScanning {
     INCLUDE_HINTS_FILE_NOT_IN_PACKAGE = 3 [(metadata) = { exit_code: 36 }];
     INCLUDE_HINTS_READ_FAILURE = 4 [(metadata) = { exit_code: 36 }];
     ILLEGAL_ABSOLUTE_PATH = 5 [(metadata) = { exit_code: 1 }];
-    // TODO(b/138456686): this code should be deprecated in favor of more finely
-    //   resolved loading-phase codes.
+    // TODO(b/166268889): this code should be deprecated in favor of more finely
+    //  resolved loading-phase codes.
     PACKAGE_LOAD_FAILURE = 6 [(metadata) = { exit_code: 1 }];
+    USER_PACKAGE_LOAD_FAILURE = 7 [(metadata) = { exit_code: 1 }];
+    SYSTEM_PACKAGE_LOAD_FAILURE = 8 [(metadata) = { exit_code: 36 }];
+    UNDIFFERENTIATED_PACKAGE_LOAD_FAILURE = 9 [(metadata) = { exit_code: 1 }];
   }
 
   Code code = 1;
+  PackageLoading.Code package_loading_code = 2;
 }
 
 message TestCommand {
@@ -767,6 +786,7 @@ message ActionQuery {
     TOP_LEVEL_TARGETS_WITH_SKYFRAME_STATE_NOT_SUPPORTED = 11
         [(metadata) = { exit_code: 2 }];
     SKYFRAME_STATE_AFTER_EXECUTION = 12 [(metadata) = { exit_code: 1 }];
+    LABELS_FUNCTION_NOT_SUPPORTED = 13 [(metadata) = { exit_code: 2 }];
   }
 
   Code code = 1;
@@ -902,7 +922,7 @@ message RunCommand {
     NO_TARGET_SPECIFIED = 1 [(metadata) = { exit_code: 2 }];
     TOO_MANY_TARGETS_SPECIFIED = 2 [(metadata) = { exit_code: 2 }];
     TARGET_NOT_EXECUTABLE = 3 [(metadata) = { exit_code: 2 }];
-    TARGET_BUILT_BUT_PATH_NOT_EXECUTABLE = 4 [(metadata) = { exit_code: 37 }];
+    TARGET_BUILT_BUT_PATH_NOT_EXECUTABLE = 4 [(metadata) = { exit_code: 1 }];
     TARGET_BUILT_BUT_PATH_VALIDATION_FAILED = 5
         [(metadata) = { exit_code: 36 }];
     RUN_UNDER_TARGET_NOT_BUILT = 6 [(metadata) = { exit_code: 2 }];
@@ -1040,6 +1060,7 @@ message FailAction {
     INCORRECT_TOOLCHAIN = 6 [(metadata) = { exit_code: 1 }];
     FRAGMENT_CLASS_MISSING = 7 [(metadata) = { exit_code: 1 }];
     reserved 8, 9; // For internal use
+    CANT_BUILD_INCOMPATIBLE_TARGET = 10 [(metadata) = { exit_code: 1 }];
   }
 
   Code code = 1;
@@ -1135,6 +1156,7 @@ message Analysis {
     INVALID_EXECUTION_PLATFORM = 16 [(metadata) = { exit_code: 1 }];
     ASPECT_CREATION_FAILED = 17 [(metadata) = { exit_code: 1 }];
     CONFIGURED_VALUE_CREATION_FAILED = 18 [(metadata) = { exit_code: 1 }];
+    INCOMPATIBLE_TARGET_REQUESTED = 19 [(metadata) = { exit_code: 1 }];
   }
 
   Code code = 1;
@@ -1148,8 +1170,9 @@ message PackageLoading {
     BUILD_FILE_MISSING = 3 [(metadata) = { exit_code: 1 }];
     REPOSITORY_MISSING = 4 [(metadata) = { exit_code: 1 }];
     PERSISTENT_INCONSISTENT_FILESYSTEM_ERROR = 5
-        [(metadata) = { exit_code: 1 }];
-    TRANSIENT_INCONSISTENT_FILESYSTEM_ERROR = 6 [(metadata) = { exit_code: 1 }];
+        [(metadata) = { exit_code: 36 }];
+    TRANSIENT_INCONSISTENT_FILESYSTEM_ERROR = 6
+        [(metadata) = { exit_code: 36 }];
     INVALID_NAME = 7 [(metadata) = { exit_code: 1 }];
     // was: PRELUDE_FILE_READ_ERROR. Replaced by IMPORT_STARLARK_FILE_ERROR
     // when the prelude was changed to be loaded as a Starlark module.
@@ -1174,6 +1197,12 @@ message PackageLoading {
     LICENSE_PARSE_FAILURE = 26 [(metadata) = { exit_code: 1 }];
     DISTRIBUTIONS_PARSE_FAILURE = 27 [(metadata) = { exit_code: 1 }];
     LABEL_CROSSES_PACKAGE_BOUNDARY = 28 [(metadata) = { exit_code: 1 }];
+    // Failure while evaluating or applying @_builtins injection. Since the
+    // builtins .bzl files are always packaged with Blaze in production, a
+    // failure here generally indicates a bug in Blaze.
+    BUILTINS_INJECTION_FAILURE = 29 [(metadata) = { exit_code: 1 }];
+    SYMLINK_CYCLE_OR_INFINITE_EXPANSION = 30 [(metadata) = { exit_code: 1 }];
+    OTHER_IO_EXCEPTION = 31 [(metadata) = { exit_code: 36 }];
   }
 
   Code code = 1;

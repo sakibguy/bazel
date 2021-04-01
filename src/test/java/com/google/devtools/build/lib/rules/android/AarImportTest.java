@@ -28,18 +28,19 @@ import com.google.devtools.build.lib.analysis.FilesToRunProvider;
 import com.google.devtools.build.lib.analysis.OutputGroupInfo;
 import com.google.devtools.build.lib.analysis.actions.SpawnAction;
 import com.google.devtools.build.lib.analysis.configuredtargets.FileConfiguredTarget;
-import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
+import com.google.devtools.build.lib.rules.android.AarImportTest.WithPlatforms;
+import com.google.devtools.build.lib.rules.android.AarImportTest.WithoutPlatforms;
 import com.google.devtools.build.lib.rules.android.databinding.DataBindingV2Provider;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider;
 import com.google.devtools.build.lib.rules.java.JavaCompilationInfoProvider;
 import com.google.devtools.build.lib.rules.java.JavaConfiguration.ImportDepsCheckingLevel;
 import com.google.devtools.build.lib.rules.java.JavaInfo;
 import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider;
-import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider.OutputJar;
-import com.google.devtools.build.lib.rules.java.JavaSourceInfoProvider;
+import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider.JavaOutput;
 import com.google.devtools.build.lib.rules.java.JavaSourceJarsProvider;
+import com.google.devtools.build.lib.rules.java.ProguardSpecProvider;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
@@ -50,10 +51,25 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
+import org.junit.runners.Suite;
+import org.junit.runners.Suite.SuiteClasses;
 
 /** Tests for {@link com.google.devtools.build.lib.rules.android.AarImport}. */
-@RunWith(JUnit4.class)
-public class AarImportTest extends BuildViewTestCase {
+@RunWith(Suite.class)
+@SuiteClasses({WithoutPlatforms.class, WithPlatforms.class})
+public abstract class AarImportTest extends AndroidBuildViewTestCase {
+  /** Use legacy toolchain resolution. */
+  @RunWith(JUnit4.class)
+  public static class WithoutPlatforms extends AarImportTest {}
+
+  /** Use platform-based toolchain resolution. */
+  @RunWith(JUnit4.class)
+  public static class WithPlatforms extends AarImportTest {
+    @Override
+    protected boolean platformBasedToolchains() {
+      return true;
+    }
+  }
 
   @Before
   public void setup() throws Exception {
@@ -141,6 +157,46 @@ public class AarImportTest extends BuildViewTestCase {
   }
 
   @Test
+  public void proguardSpecsProvided() throws Exception {
+    ConfiguredTarget binaryTarget = getConfiguredTarget("//a:bar");
+
+    NestedSet<Artifact> transitiveProguardSpecs =
+        binaryTarget.get(ProguardSpecProvider.PROVIDER).getTransitiveProguardSpecs();
+
+    assertThat(
+            transitiveProguardSpecs.toSet().stream()
+                .map(Artifact::getRootRelativePathString)
+                .collect(Collectors.toSet()))
+        .containsExactly(
+            "a/_aar/bar/proguard.txt", "a/_aar/foo/proguard.txt", "a/_aar/baz/proguard.txt");
+  }
+
+  @Test
+  public void testProguardExtractor() throws Exception {
+    Artifact proguardSpecsAritfact =
+        getConfiguredTarget("//a:bar")
+            .get(ProguardSpecProvider.PROVIDER)
+            .getTransitiveProguardSpecs()
+            .toList()
+            .get(0);
+
+    Artifact aarProguardExtractor =
+        getHostConfiguredTarget(
+                ruleClassProvider.getToolsRepository()
+                    + "//tools/android:aar_embedded_proguard_extractor")
+            .getProvider(FilesToRunProvider.class)
+            .getExecutable();
+
+    assertThat(getGeneratingSpawnAction(proguardSpecsAritfact).getArguments())
+        .containsExactly(
+            aarProguardExtractor.getExecPathString(),
+            "--input_aar",
+            "a/bar.aar",
+            "--output_proguard_file",
+            proguardSpecsAritfact.getExecPathString());
+  }
+
+  @Test
   public void aapt2RTxtProvided() throws Exception {
     useConfiguration("--android_sdk=//aapt2/sdk:sdk");
 
@@ -223,13 +279,6 @@ public class AarImportTest extends BuildViewTestCase {
     assertThat(srcJars).hasSize(1);
     Artifact srcJar = Iterables.getOnlyElement(srcJars);
     assertThat(srcJar.getExecPathString()).endsWith("foo-src.jar");
-
-    Iterable<Artifact> srcInfoJars =
-        JavaInfo.getProvider(JavaSourceInfoProvider.class, aarImportTarget)
-            .getSourceJarsForJarFiles();
-    assertThat(srcInfoJars).hasSize(1);
-    Artifact srcInfoJar = Iterables.getOnlyElement(srcInfoJars);
-    assertThat(srcInfoJar.getExecPathString()).endsWith("foo-src.jar");
   }
 
   @Test
@@ -241,13 +290,6 @@ public class AarImportTest extends BuildViewTestCase {
             .getTransitiveSourceJars();
     assertThat(ActionsTestUtil.baseArtifactNames(srcJars))
         .containsExactly("foo-src.jar", "bar-src.jar");
-
-    Iterable<Artifact> srcInfoJars =
-        JavaInfo.getProvider(JavaSourceInfoProvider.class, aarImportTarget)
-            .getSourceJarsForJarFiles();
-    assertThat(srcInfoJars).hasSize(1);
-    Artifact srcInfoJar = Iterables.getOnlyElement(srcInfoJars);
-    assertThat(srcInfoJar.getExecPathString()).endsWith("bar-src.jar");
   }
 
   @Test
@@ -371,7 +413,7 @@ public class AarImportTest extends BuildViewTestCase {
   }
 
   private void checkDepsCheckerOutputArtifact(Artifact artifact, String expectedCheckingMode)
-      throws CommandLineExpansionException {
+      throws CommandLineExpansionException, InterruptedException {
     assertThat(artifact.isTreeArtifact()).isFalse();
     assertThat(artifact.getExecPathString()).endsWith("_aar/bar/jdeps.proto");
 
@@ -454,11 +496,11 @@ public class AarImportTest extends BuildViewTestCase {
   public void testClassesJarProvided() throws Exception {
     ConfiguredTarget aarImportTarget = getConfiguredTarget("//a:foo");
 
-    Iterable<OutputJar> outputJars =
-        JavaInfo.getProvider(JavaRuleOutputJarsProvider.class, aarImportTarget).getOutputJars();
-    assertThat(outputJars).hasSize(1);
+    Iterable<JavaOutput> javaOutputs =
+        JavaInfo.getProvider(JavaRuleOutputJarsProvider.class, aarImportTarget).getJavaOutputs();
+    assertThat(javaOutputs).hasSize(1);
 
-    Artifact classesJar = outputJars.iterator().next().getClassJar();
+    Artifact classesJar = javaOutputs.iterator().next().getClassJar();
     assertThat(classesJar.getFilename()).isEqualTo("classes_and_libs_merged.jar");
 
     SpawnAction jarMergingAction = ((SpawnAction) getGeneratingAction(classesJar));
@@ -575,7 +617,9 @@ public class AarImportTest extends BuildViewTestCase {
     checkError(
         "aar",
         "aar",
-        "No Android SDK found. Use the --android_sdk command line option to specify one.",
+        platformBasedToolchains()
+            ? "resolved to target //sdk:sdk, but that target does not provide ToolchainInfo"
+            : "No Android SDK found. Use the --android_sdk command line option to specify one.",
         "aar_import(",
         "    name = 'aar',",
         "    aar = 'a.aar',",

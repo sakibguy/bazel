@@ -22,6 +22,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.devtools.build.lib.concurrent.AbstractQueueVisitor;
 import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
 import com.google.devtools.build.skyframe.Differencer.Diff;
@@ -50,7 +51,7 @@ import javax.annotation.Nullable;
  */
 public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
 
-  private final ImmutableMap<SkyFunctionName, ? extends SkyFunction> skyFunctions;
+  private final ImmutableMap<SkyFunctionName, SkyFunction> skyFunctions;
   private final DirtyTrackingProgressReceiver progressReceiver;
   // Not final only for testing.
   private InMemoryGraph graph;
@@ -78,12 +79,12 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
   private final AtomicBoolean evaluating = new AtomicBoolean(false);
 
   public InMemoryMemoizingEvaluator(
-      Map<SkyFunctionName, ? extends SkyFunction> skyFunctions, Differencer differencer) {
+      Map<SkyFunctionName, SkyFunction> skyFunctions, Differencer differencer) {
     this(skyFunctions, differencer, null);
   }
 
   public InMemoryMemoizingEvaluator(
-      Map<SkyFunctionName, ? extends SkyFunction> skyFunctions,
+      Map<SkyFunctionName, SkyFunction> skyFunctions,
       Differencer differencer,
       @Nullable EvaluationProgressReceiver progressReceiver) {
     this(
@@ -97,7 +98,7 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
   }
 
   public InMemoryMemoizingEvaluator(
-      Map<SkyFunctionName, ? extends SkyFunction> skyFunctions,
+      Map<SkyFunctionName, SkyFunction> skyFunctions,
       Differencer differencer,
       @Nullable EvaluationProgressReceiver progressReceiver,
       GraphInconsistencyReceiver graphInconsistencyReceiver,
@@ -286,6 +287,11 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
   }
 
   @Override
+  public void postLoggingStats(ExtendedEventHandler eventHandler) {
+    eventHandler.post(new SkyframeGraphStatsEvent(graph.getValues().size()));
+  }
+
+  @Override
   public Map<SkyKey, SkyValue> getValues() {
     return graph.getValues();
   }
@@ -384,7 +390,7 @@ public final class InMemoryMemoizingEvaluator implements MemoizingEvaluator {
     }
   }
 
-  public ImmutableMap<SkyFunctionName, ? extends SkyFunction> getSkyFunctionsForTesting() {
+  public ImmutableMap<SkyFunctionName, SkyFunction> getSkyFunctionsForTesting() {
     return skyFunctions;
   }
 

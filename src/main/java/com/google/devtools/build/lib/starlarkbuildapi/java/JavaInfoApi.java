@@ -14,16 +14,20 @@
 
 package com.google.devtools.build.lib.starlarkbuildapi.java;
 
+import com.google.common.collect.ImmutableList;
 import com.google.devtools.build.docgen.annot.DocCategory;
 import com.google.devtools.build.docgen.annot.StarlarkConstructor;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.starlarkbuildapi.FileApi;
 import com.google.devtools.build.lib.starlarkbuildapi.core.ProviderApi;
 import com.google.devtools.build.lib.starlarkbuildapi.core.StructApi;
+import javax.annotation.Nullable;
 import net.starlark.java.annot.Param;
+import net.starlark.java.annot.ParamType;
 import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.annot.StarlarkMethod;
 import net.starlark.java.eval.EvalException;
+import net.starlark.java.eval.NoneType;
 import net.starlark.java.eval.Sequence;
 import net.starlark.java.eval.StarlarkThread;
 
@@ -32,7 +36,8 @@ import net.starlark.java.eval.StarlarkThread;
     name = "JavaInfo",
     doc = "A provider encapsulating information about Java and Java-like targets.",
     category = DocCategory.PROVIDER)
-public interface JavaInfoApi<FileT extends FileApi> extends StructApi {
+public interface JavaInfoApi<FileT extends FileApi, JavaOutputT extends JavaOutputApi<FileT>>
+    extends StructApi {
 
   @StarlarkMethod(
       name = "transitive_runtime_jars",
@@ -93,16 +98,27 @@ public interface JavaInfoApi<FileT extends FileApi> extends StructApi {
 
   @StarlarkMethod(
       name = "outputs",
-      doc = "Returns information about outputs of this Java/Java-like target.",
+      doc =
+          "Returns information about outputs of this Java/Java-like target. Deprecated: use"
+              + " java_outputs.",
       structField = true,
       allowReturnNones = true)
+  @Nullable
+  @Deprecated
   JavaRuleOutputJarsProviderApi<?> getOutputJars();
+
+  @StarlarkMethod(
+      name = "java_outputs",
+      doc = "Returns information about outputs of this Java/Java-like target.",
+      structField = true)
+  ImmutableList<JavaOutputT> getJavaOutputs();
 
   @StarlarkMethod(
       name = "annotation_processing",
       structField = true,
       allowReturnNones = true,
       doc = "Returns information about annotation processing for this Java/Java-like target.")
+  @Nullable
   JavaAnnotationProcessingApi<?> getGenJarsProvider();
 
   @StarlarkMethod(
@@ -110,6 +126,7 @@ public interface JavaInfoApi<FileT extends FileApi> extends StructApi {
       structField = true,
       allowReturnNones = true,
       doc = "Returns compilation information for this Java/Java-like target.")
+  @Nullable
   JavaCompilationInfoProviderApi<?> getCompilationInfoProvider();
 
   @StarlarkMethod(
@@ -162,17 +179,17 @@ public interface JavaInfoApi<FileT extends FileApi> extends StructApi {
         parameters = {
           @Param(
               name = "output_jar",
-              type = FileApi.class,
               named = true,
               doc =
                   "The jar that was created as a result of a compilation "
                       + "(e.g. javac, scalac, etc)."),
           @Param(
               name = "compile_jar",
-              type = FileApi.class,
+              allowedTypes = {
+                @ParamType(type = FileApi.class),
+                @ParamType(type = NoneType.class),
+              },
               named = true,
-              noneable = true,
-              defaultValue = "None",
               doc =
                   "A jar that is added as the compile-time dependency in lieu of "
                       + "<code>output_jar</code>. Typically this is the ijar produced by "
@@ -181,41 +198,99 @@ public interface JavaInfoApi<FileT extends FileApi> extends StructApi {
                       + "If you cannot use ijar, consider instead using the output of "
                       + "<code><a class=\"anchor\" href=\"java_common.html#stamp_jar\">"
                       + "stamp_ijar</a></code>. If you do not wish to use either, "
-                      + "you can simply pass <code>output_jar</code>."),
+                      + "you can simply pass <code>output_jar</code>. "
+                      + "There are a couple of special cases when this parameter may be set to "
+                      + "<code>None</code>, for example adding a jar with resources or when used in"
+                      + " a terminal rule like <code>java_binary</code>."),
           @Param(
               name = "source_jar",
-              type = FileApi.class,
+              allowedTypes = {
+                @ParamType(type = FileApi.class),
+                @ParamType(type = NoneType.class),
+              },
               named = true,
-              noneable = true,
               defaultValue = "None",
               doc =
                   "The source jar that was used to create the output jar. "
                       + "Use <code><a class=\"anchor\" href=\"java_common.html#pack_sources\">"
                       + "pack_sources</a></code> to produce this source jar."),
           @Param(
+              name = "compile_jdeps",
+              allowedTypes = {
+                @ParamType(type = FileApi.class),
+                @ParamType(type = NoneType.class),
+              },
+              named = true,
+              defaultValue = "None",
+              doc =
+                  "jdeps information about compile time dependencies to be consumed by"
+                      + " JavaCompileAction. This should be a binary proto encoded using the"
+                      + " deps.proto protobuf included with Bazel.  If available this file is"
+                      + " typically produced by a header compiler."),
+          @Param(
+              name = "generated_class_jar",
+              allowedTypes = {
+                @ParamType(type = FileApi.class),
+                @ParamType(type = NoneType.class),
+              },
+              named = true,
+              defaultValue = "None",
+              doc =
+                  "A jar file containing class files compiled from sources generated during"
+                      + " annotation processing."),
+          @Param(
+              name = "generated_source_jar",
+              allowedTypes = {
+                @ParamType(type = FileApi.class),
+                @ParamType(type = NoneType.class),
+              },
+              named = true,
+              defaultValue = "None",
+              doc = "The source jar that was created as a result of annotation processing."),
+          @Param(
+              name = "native_headers_jar",
+              allowedTypes = {
+                @ParamType(type = FileApi.class),
+                @ParamType(type = NoneType.class),
+              },
+              named = true,
+              defaultValue = "None",
+              doc =
+                  "A jar containing CC header files supporting native method implementation"
+                      + " (typically output of javac -h)."),
+          @Param(
+              name = "manifest_proto",
+              allowedTypes = {
+                @ParamType(type = FileApi.class),
+                @ParamType(type = NoneType.class),
+              },
+              named = true,
+              defaultValue = "None",
+              doc =
+                  "Manifest information for the rule output (if available). This should be a"
+                      + " binary proto encoded using the manifest.proto protobuf included with"
+                      + " Bazel.  IDEs and other tools can use this information for more efficient"
+                      + " processing."),
+          @Param(
               name = "neverlink",
-              type = Boolean.class,
               named = true,
               defaultValue = "False",
               doc = "If true only use this library for compilation and not at runtime."),
           @Param(
               name = "deps",
-              type = Sequence.class,
-              generic1 = JavaInfoApi.class,
+              allowedTypes = {@ParamType(type = Sequence.class, generic1 = JavaInfoApi.class)},
               named = true,
               defaultValue = "[]",
               doc = "Compile time dependencies that were used to create the output jar."),
           @Param(
               name = "runtime_deps",
-              type = Sequence.class,
-              generic1 = JavaInfoApi.class,
+              allowedTypes = {@ParamType(type = Sequence.class, generic1 = JavaInfoApi.class)},
               named = true,
               defaultValue = "[]",
               doc = "Runtime dependencies that are needed for this library."),
           @Param(
               name = "exports",
-              type = Sequence.class,
-              generic1 = JavaInfoApi.class,
+              allowedTypes = {@ParamType(type = Sequence.class, generic1 = JavaInfoApi.class)},
               named = true,
               defaultValue = "[]",
               doc =
@@ -224,10 +299,12 @@ public interface JavaInfoApi<FileT extends FileApi> extends StructApi {
                       + "master/be/java.html#java_library.exports\">java_library.exports</a>."),
           @Param(
               name = "jdeps",
-              type = FileApi.class,
+              allowedTypes = {
+                @ParamType(type = FileApi.class),
+                @ParamType(type = NoneType.class),
+              },
               named = true,
               defaultValue = "None",
-              noneable = true,
               doc =
                   "jdeps information for the rule output (if available). This should be a binary"
                       + " proto encoded using the deps.proto protobuf included with Bazel.  If"
@@ -237,10 +314,15 @@ public interface JavaInfoApi<FileT extends FileApi> extends StructApi {
         selfCall = true,
         useStarlarkThread = true)
     @StarlarkConstructor
-    JavaInfoApi<?> javaInfo(
+    JavaInfoApi<?, ?> javaInfo(
         FileApi outputJarApi,
         Object compileJarApi,
         Object sourceJarApi,
+        Object compileJdepsApi,
+        Object generatedClassJarApi,
+        Object generatedSourceJarApi,
+        Object nativeHeadersJarApi,
+        Object manifestProtoApi,
         Boolean neverlink,
         Sequence<?> deps,
         Sequence<?> runtimeDeps,

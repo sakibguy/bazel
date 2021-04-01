@@ -1,11 +1,19 @@
 ---
 layout: documentation
 title: Installing Bazel on Windows
+category: getting-started
 ---
 
 # Installing Bazel on Windows
 
+This page describes the requirements and steps to install Bazel on Windows.
+It also includes troubleshooting and other ways to install Bazel, such as
+using Chocolatey or Scoop.
+
 ## Installing Bazel
+
+This section covers the prerequisites, environment setup, and detailed
+steps during installation on Windows.
 
 ### Step 1: Check your system
 
@@ -81,7 +89,7 @@ Depending on which languages you want to build, you will need:
 
 *   Common MSYS2 packages
 
-    You will likely need these to build and run targets that depend on Bash.  MSYS2 does not install
+    You will likely need these to build and run targets that depend on Bash. MSYS2 does not install
     these tools by default, so you need to install them manually. Projects that depend on Bash tools in `PATH` need this step (for example TensorFlow).
 
     Open the MSYS2 terminal and run this command:

@@ -106,8 +106,12 @@ public interface JavaSemantics {
     return environment.getToolsLabel("//tools/jdk:current_java_toolchain");
   }
 
-  /** Name of the output group used for source jars. */
+  /** Name of the output group used for transitive source jars. */
   String SOURCE_JARS_OUTPUT_GROUP = OutputGroupInfo.HIDDEN_OUTPUT_GROUP_PREFIX + "source_jars";
+
+  /** Name of the output group used for direct source jars. */
+  String DIRECT_SOURCE_JARS_OUTPUT_GROUP =
+      OutputGroupInfo.HIDDEN_OUTPUT_GROUP_PREFIX + "direct_source_jars";
 
   /** Implementation for the :jvm attribute. */
   static Label jvmAttribute(RuleDefinitionEnvironment env) {
@@ -136,6 +140,11 @@ public interface JavaSemantics {
               // Don't depend on the launcher if we don't create an executable anyway
               if (attributes.has("create_executable")
                   && !attributes.get("create_executable", Type.BOOLEAN)) {
+                return null;
+              }
+
+              // use_launcher=False disables the launcher
+              if (attributes.has("use_launcher") && !attributes.get("use_launcher", Type.BOOLEAN)) {
                 return null;
               }
 
@@ -428,8 +437,7 @@ public interface JavaSemantics {
       throws InterruptedException;
 
   /** Translates XMB messages to translations artifact suitable for Java targets. */
-  ImmutableList<Artifact> translate(
-      RuleContext ruleContext, JavaConfiguration javaConfig, List<Artifact> messages);
+  ImmutableList<Artifact> translate(RuleContext ruleContext, List<Artifact> messages);
 
   /**
    * Get the launcher artifact for a java binary, creating the necessary actions for it.
@@ -511,6 +519,4 @@ public interface JavaSemantics {
   Artifact getObfuscatedConstantStringMap(RuleContext ruleContext) throws InterruptedException;
 
   void checkDependencyRuleKinds(RuleContext ruleContext);
-
-  boolean shouldSetupJavaBuilderTemporaryDirectories();
 }

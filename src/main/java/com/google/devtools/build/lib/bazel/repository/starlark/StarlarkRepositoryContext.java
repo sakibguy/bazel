@@ -40,6 +40,7 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.events.ExtendedEventHandler.FetchProgress;
 import com.google.devtools.build.lib.packages.Attribute;
 import com.google.devtools.build.lib.packages.Rule;
+import com.google.devtools.build.lib.packages.StarlarkInfo;
 import com.google.devtools.build.lib.packages.StructImpl;
 import com.google.devtools.build.lib.packages.StructProvider;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
@@ -57,7 +58,6 @@ import com.google.devtools.build.lib.starlarkbuildapi.repository.StarlarkReposit
 import com.google.devtools.build.lib.util.OsUtils;
 import com.google.devtools.build.lib.util.StringUtilities;
 import com.google.devtools.build.lib.util.io.OutErr;
-import com.google.devtools.build.lib.vfs.FileSystem;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -86,12 +86,12 @@ import java.util.Map;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.EvalException;
-import net.starlark.java.eval.Mutability;
 import net.starlark.java.eval.Sequence;
 import net.starlark.java.eval.Starlark;
 import net.starlark.java.eval.StarlarkInt;
 import net.starlark.java.eval.StarlarkSemantics;
 import net.starlark.java.eval.StarlarkThread;
+import net.starlark.java.syntax.Location;
 
 /** Starlark API for the repository_rule's context. */
 public class StarlarkRepositoryContext
@@ -154,7 +154,7 @@ public class StarlarkRepositoryContext
       if (!name.equals("$local")) {
         // Attribute values should be type safe
         attrBuilder.put(
-            Attribute.getStarlarkName(name), Starlark.fromJava(attrs.getObject(name), null));
+            Attribute.getStarlarkName(name), Attribute.valueToStarlark(attrs.getObject(name)));
       }
     }
     attrObject = StructProvider.STRUCT.create(attrBuilder.build(), "No such attribute '%s'");
@@ -204,7 +204,7 @@ public class StarlarkRepositoryContext
       PathFragment pathFragment = PathFragment.create(path.toString());
       return new StarlarkPath(
           pathFragment.isAbsolute()
-              ? outputDirectory.getFileSystem().getPath(path.toString())
+              ? outputDirectory.getFileSystem().getPath(pathFragment)
               : outputDirectory.getRelative(pathFragment));
     } else if (path instanceof Label) {
       return getPathFromLabel((Label) path);
@@ -615,9 +615,8 @@ public class StarlarkRepositoryContext
     env.getListener().post(w);
     try {
       Path path = starlarkPath.getPath();
-      FileSystem fileSystem = path.getFileSystem();
-      fileSystem.deleteTreesBelow(path);
-      return fileSystem.delete(path);
+      path.deleteTreesBelow();
+      return path.delete();
     } catch (IOException e) {
       throw new RepositoryFunctionException(e, Transience.TRANSIENT);
     }
@@ -651,7 +650,10 @@ public class StarlarkRepositoryContext
     env.getListener().post(w);
     if (program.contains("/") || program.contains("\\")) {
       throw Starlark.errorf(
-          "Program argument of which() may not contains a / or a \\ ('%s' given)", program);
+          "Program argument of which() may not contain a / or a \\ ('%s' given)", program);
+    }
+    if (program.length() == 0) {
+      throw Starlark.errorf("Program argument of which() may not be empty");
     }
     try {
       StarlarkPath commandPath = findCommandOnPath(program);
@@ -770,8 +772,8 @@ public class StarlarkRepositoryContext
           new IOException("thread interrupted"), Transience.TRANSIENT);
     } catch (IOException e) {
       if (allowFail) {
-        Dict<String, Object> dict = Dict.of((Mutability) null, "success", false);
-        return StructProvider.STRUCT.createWithBuiltinLocation(dict);
+        return StarlarkInfo.create(
+            StructProvider.STRUCT, ImmutableMap.of("success", false), Location.BUILTIN);
       } else {
         throw new RepositoryFunctionException(e, Transience.TRANSIENT);
       }
@@ -898,8 +900,8 @@ public class StarlarkRepositoryContext
     } catch (IOException e) {
       env.getListener().post(w);
       if (allowFail) {
-        Dict<String, Object> dict = Dict.of((Mutability) null, "success", false);
-        return StructProvider.STRUCT.createWithBuiltinLocation(dict);
+        return StarlarkInfo.create(
+            StructProvider.STRUCT, ImmutableMap.of("success", false), Location.BUILTIN);
       } else {
         throw new RepositoryFunctionException(e, Transience.TRANSIENT);
       }
@@ -971,7 +973,14 @@ public class StarlarkRepositoryContext
       // The checksum is checked on download, so if we got here, the user provided checksum is good
       return originalChecksum.get();
     }
-    return Checksum.fromString(KeyType.SHA256, RepositoryCache.getChecksum(KeyType.SHA256, path));
+    try {
+      return Checksum.fromString(KeyType.SHA256, RepositoryCache.getChecksum(KeyType.SHA256, path));
+    } catch (Checksum.InvalidChecksumException e) {
+      throw new IllegalStateException(
+          "Unexpected invalid checksum from internal computation of SHA-256 checksum on "
+              + path.getPathString(),
+          e);
+    }
   }
 
   private Optional<Checksum> validateChecksum(String sha256, String integrity, List<URL> urls)
@@ -982,7 +991,7 @@ public class StarlarkRepositoryContext
       }
       try {
         return Optional.of(Checksum.fromString(KeyType.SHA256, sha256));
-      } catch (IllegalArgumentException e) {
+      } catch (Checksum.InvalidChecksumException e) {
         warnAboutChecksumError(urls, e.getMessage());
         throw new RepositoryFunctionException(
             Starlark.errorf(
@@ -998,7 +1007,7 @@ public class StarlarkRepositoryContext
 
     try {
       return Optional.of(Checksum.fromSubresourceIntegrity(integrity));
-    } catch (IllegalArgumentException e) {
+    } catch (Checksum.InvalidChecksumException e) {
       warnAboutChecksumError(urls, e.getMessage());
       throw new RepositoryFunctionException(
           Starlark.errorf(
@@ -1020,7 +1029,7 @@ public class StarlarkRepositoryContext
           Transience.PERSISTENT);
     }
 
-    ImmutableMap.Builder<String, Object> out = new ImmutableMap.Builder<>();
+    ImmutableMap.Builder<String, Object> out = ImmutableMap.builder();
     out.put("success", true);
     out.put("integrity", finalChecksum.toSubresourceIntegrity());
 
@@ -1028,7 +1037,7 @@ public class StarlarkRepositoryContext
     if (finalChecksum.getKeyType() == KeyType.SHA256) {
       out.put("sha256", finalChecksum.toString());
     }
-    return StructProvider.STRUCT.createWithBuiltinLocation(Dict.copyOf(null, out.build()));
+    return StarlarkInfo.create(StructProvider.STRUCT, out.build(), Location.BUILTIN);
   }
 
   private static ImmutableList<String> checkAllUrls(Iterable<?> urlList) throws EvalException {

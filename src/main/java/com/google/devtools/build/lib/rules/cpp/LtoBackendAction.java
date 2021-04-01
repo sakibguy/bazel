@@ -45,6 +45,7 @@ import com.google.devtools.build.lib.vfs.PathFragment;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -131,32 +132,35 @@ public final class LtoBackendAction extends SpawnAction {
   @Override
   public NestedSet<Artifact> discoverInputs(ActionExecutionContext actionExecutionContext)
       throws ActionExecutionException {
-    // Build set of files this LTO backend artifact will import from.
-    HashSet<PathFragment> importSet = new HashSet<>();
+    List<String> lines;
     try {
-      for (String line :
-          FileSystemUtils.iterateLinesAsLatin1(actionExecutionContext.getInputPath(imports))) {
-        if (!line.isEmpty()) {
-          PathFragment execPath = PathFragment.create(line);
-          if (execPath.isAbsolute()) {
-            String message =
-                String.format(
-                    "Absolute paths not allowed in imports file %s: %s",
-                    actionExecutionContext.getInputPath(imports), execPath);
-            DetailedExitCode code =
-                createDetailedExitCode(message, Code.INVALID_ABSOLUTE_PATH_IN_IMPORTS);
-            throw new ActionExecutionException(message, this, false, code);
-          }
-          importSet.add(PathFragment.create(line));
-        }
-      }
+      lines = FileSystemUtils.readLinesAsLatin1(actionExecutionContext.getInputPath(imports));
     } catch (IOException e) {
       String message =
           String.format(
-              "error iterating imports file %s: %s",
+              "error reading imports file %s: %s",
               actionExecutionContext.getInputPath(imports), e.getMessage());
       DetailedExitCode code = createDetailedExitCode(message, Code.IMPORTS_READ_IO_EXCEPTION);
       throw new ActionExecutionException(message, e, this, false, code);
+    }
+
+    // Build set of files this LTO backend artifact will import from.
+    HashSet<PathFragment> importSet = new HashSet<>();
+    for (String line : lines) {
+      if (line.isEmpty()) {
+        continue;
+      }
+      PathFragment execPath = PathFragment.create(line);
+      if (execPath.isAbsolute()) {
+        String message =
+            String.format(
+                "Absolute paths not allowed in imports file %s: %s",
+                actionExecutionContext.getInputPath(imports), execPath);
+        DetailedExitCode code =
+            createDetailedExitCode(message, Code.INVALID_ABSOLUTE_PATH_IN_IMPORTS);
+        throw new ActionExecutionException(message, this, false, code);
+      }
+      importSet.add(execPath);
     }
 
     // Convert the import set of paths to the set of bitcode file artifacts.
@@ -182,10 +186,13 @@ public final class LtoBackendAction extends SpawnAction {
       throw new ActionExecutionException(message, this, false, code);
     }
     updateInputs(
-        NestedSetBuilder.fromNestedSet(bitcodeInputSet)
-            .addTransitive(getMandatoryInputs())
-            .build());
+        NestedSetBuilder.fromNestedSet(bitcodeInputSet).addTransitive(mandatoryInputs).build());
     return bitcodeInputSet;
+  }
+
+  @Override
+  protected NestedSet<Artifact> getOriginalInputs() {
+    return mandatoryInputs;
   }
 
   private static DetailedExitCode createDetailedExitCode(String message, Code detailedCode) {
@@ -210,7 +217,8 @@ public final class LtoBackendAction extends SpawnAction {
   protected void computeKey(
       ActionKeyContext actionKeyContext,
       @Nullable Artifact.ArtifactExpander artifactExpander,
-      Fingerprint fp) {
+      Fingerprint fp)
+      throws InterruptedException {
     fp.addString(GUID);
     try {
       fp.addStrings(getArguments());
@@ -223,7 +231,7 @@ public final class LtoBackendAction extends SpawnAction {
     for (Artifact runfilesManifest : runfilesManifests) {
       fp.addPath(runfilesManifest.getExecPath());
     }
-    for (Artifact input : getMandatoryInputs().toList()) {
+    for (Artifact input : mandatoryInputs.toList()) {
       fp.addPath(input.getExecPath());
     }
     if (imports != null) {

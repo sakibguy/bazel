@@ -17,7 +17,6 @@ package com.google.devtools.build.lib.packages;
 import static com.google.devtools.build.lib.packages.PackageFactory.getContext;
 
 import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.devtools.build.lib.cmdline.Label;
@@ -39,7 +38,6 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.Dict;
 import net.starlark.java.eval.EvalException;
@@ -140,8 +138,7 @@ public class StarlarkNativeModule implements StarlarkNativeModuleApi {
     BazelStarlarkContext.from(thread).checkLoadingOrWorkspacePhase("native.existing_rule");
     PackageContext context = getContext(thread);
     Target target = context.pkgBuilder.getTarget(name);
-    Dict<String, Object> rule = targetDict(target, thread.mutability());
-    return rule != null ? rule : Starlark.NONE;
+    return target instanceof Rule ? getRuleDict((Rule) target, thread.mutability()) : Starlark.NONE;
   }
 
   /*
@@ -155,16 +152,13 @@ public class StarlarkNativeModule implements StarlarkNativeModuleApi {
     PackageContext context = getContext(thread);
     Collection<Target> targets = context.pkgBuilder.getTargets();
     Mutability mu = thread.mutability();
-    Dict<String, Dict<String, Object>> rules = Dict.of(mu);
+    Dict.Builder<String, Dict<String, Object>> rules = Dict.builder();
     for (Target t : targets) {
       if (t instanceof Rule) {
-        Dict<String, Object> rule = targetDict(t, mu);
-        Preconditions.checkNotNull(rule);
-        rules.put(t.getName(), rule, (Location) null);
+        rules.put(t.getName(), getRuleDict((Rule) t, mu));
       }
     }
-
-    return rules;
+    return rules.build(mu);
   }
 
   @Override
@@ -280,15 +274,9 @@ public class StarlarkNativeModule implements StarlarkNativeModuleApi {
     return packageId.getRepository().toString();
   }
 
-  @Nullable
-  private static Dict<String, Object> targetDict(Target target, Mutability mu)
-      throws EvalException {
-    if (!(target instanceof Rule)) {
-      return null;
-    }
-    Dict<String, Object> values = Dict.of(mu);
+  private static Dict<String, Object> getRuleDict(Rule rule, Mutability mu) throws EvalException {
+    Dict.Builder<String, Object> values = Dict.builder();
 
-    Rule rule = (Rule) target;
     for (Attribute attr : rule.getAttributes()) {
       if (!Character.isAlphabetic(attr.getName().charAt(0))) {
         continue;
@@ -301,21 +289,21 @@ public class StarlarkNativeModule implements StarlarkNativeModuleApi {
       }
 
       try {
-        Object val = starlarkifyValue(mu, rule.getAttr(attr.getName()), target.getPackage());
+        Object val = starlarkifyValue(mu, rule.getAttr(attr.getName()), rule.getPackage());
         if (val == null) {
           continue;
         }
-        values.put(attr.getName(), val, (Location) null);
+        values.put(attr.getName(), val);
       } catch (NotRepresentableException e) {
         throw new NotRepresentableException(
             String.format(
-                "target %s, attribute %s: %s", target.getName(), attr.getName(), e.getMessage()));
+                "target %s, attribute %s: %s", rule.getName(), attr.getName(), e.getMessage()));
       }
     }
 
-    values.put("name", rule.getName(), (Location) null);
-    values.put("kind", rule.getRuleClass(), (Location) null);
-    return values;
+    values.put("name", rule.getName());
+    values.put("kind", rule.getRuleClass());
+    return values.build(mu);
   }
 
   /**
@@ -364,14 +352,14 @@ public class StarlarkNativeModule implements StarlarkNativeModuleApi {
         if (elt == null) {
           continue;
         }
-
         l.add(elt);
       }
 
       return Tuple.copyOf(l);
     }
+
     if (val instanceof Map) {
-      Map<Object, Object> m = new TreeMap<>();
+      Dict.Builder<Object, Object> m = Dict.builder();
       for (Map.Entry<?, ?> e : ((Map<?, ?>) val).entrySet()) {
         Object key = starlarkifyValue(mu, e.getKey(), pkg);
         Object mapVal = starlarkifyValue(mu, e.getValue(), pkg);
@@ -382,8 +370,9 @@ public class StarlarkNativeModule implements StarlarkNativeModuleApi {
 
         m.put(key, mapVal);
       }
-      return Starlark.fromJava(m, mu);
+      return m.build(mu);
     }
+
     if (val.getClass().isAnonymousClass()) {
       // Computed defaults. They will be represented as
       // "deprecation": com.google.devtools.build.lib.analysis.BaseRuleClasses$2@6960884a,
@@ -397,24 +386,22 @@ public class StarlarkNativeModule implements StarlarkNativeModuleApi {
       return null;
     }
 
-    if (val instanceof StarlarkValue) {
-      return val;
+    if (val instanceof BuildType.SelectorList) {
+      List<Object> selectors = new ArrayList<>();
+      for (BuildType.Selector<?> selector : ((BuildType.SelectorList<?>) val).getSelectors()) {
+        selectors.add(
+            new SelectorValue(
+                ((Map<?, ?>) starlarkifyValue(mu, selector.getEntries(), pkg)),
+                selector.getNoMatchError()));
+      }
+      try {
+        return SelectorList.of(selectors);
+      } catch (EvalException e) {
+        throw new NotRepresentableException(e.getMessage());
+      }
     }
 
-    if (val instanceof BuildType.SelectorList) {
-      // This is terrible:
-      //  1) this value is opaque, and not a BUILD value, so it cannot be used in rule arguments
-      //  2) its representation has a pointer address, so it breaks hermeticity.
-      //
-      // Even though this is clearly imperfect, we return this value because otherwise
-      // native.rules() fails if there is any rule using a select() in the BUILD file.
-      //
-      // To remedy this, we should return a SelectorList. To do so, we have to
-      // 1) recurse into the Selector contents of SelectorList, so those values are Starlarkified
-      //    too
-      // 2) get the right Class<?> value. We could probably get at that by looking at
-      //    ((SelectorList)val).getSelectors().first().getEntries().first().getClass().
-
+    if (val instanceof StarlarkValue) {
       return val;
     }
 

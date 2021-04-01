@@ -52,6 +52,8 @@ import com.google.devtools.build.lib.rules.apple.AppleConfiguration.Configuratio
 import com.google.devtools.build.lib.rules.apple.ApplePlatform.PlatformType;
 import com.google.devtools.build.lib.rules.apple.AppleToolchain;
 import com.google.devtools.build.lib.rules.apple.DottedVersion;
+import com.google.devtools.build.lib.rules.cpp.CcCompilationContext;
+import com.google.devtools.build.lib.rules.cpp.CcInfo;
 import com.google.devtools.build.lib.rules.cpp.CppLinkAction;
 import com.google.devtools.build.lib.rules.objc.CompilationSupport.ExtraLinkArgs;
 import com.google.devtools.build.lib.testutil.TestConstants;
@@ -207,7 +209,7 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
   }
 
   @Override
-  public void initializeMockClient() throws IOException {
+  protected void initializeMockClient() throws IOException {
     super.initializeMockClient();
     MockObjcSupport.setup(mockToolsConfig);
     MockProtoSupport.setup(mockToolsConfig);
@@ -293,13 +295,7 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
     Artifact moduleMapArtifact =
         getGenfilesArtifact(
             targetName + ".modulemaps/module.modulemap", packagePath + ":" + targetName);
-    String moduleName =
-        (packagePath + "_" + targetName)
-            .replace("//", "")
-            .replace("@", "")
-            .replace("-", "_")
-            .replace("/", "_")
-            .replace(":", "_");
+    String moduleName = packagePath + ":" + targetName;
 
     return ImmutableList.of("-iquote",
         moduleMapArtifact.getExecPath().getParentDirectory().toString(),
@@ -470,42 +466,15 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
     assertHasRequirement(action, ExecutionRequirements.REQUIRES_DARWIN);
   }
 
-  protected ConfiguredTarget addBinWithTransitiveDepOnFrameworkImport(boolean compileInfoMigration)
-      throws Exception {
-    ConfiguredTarget lib =
-        compileInfoMigration
-            ? addLibWithDepOnFrameworkImportPostMigration()
-            : addLibWithDepOnFrameworkImportPreMigration();
+  protected ConfiguredTarget addBinWithTransitiveDepOnFrameworkImport() throws Exception {
+    ConfiguredTarget lib = addLibWithDepOnFrameworkImport();
     return createBinaryTargetWriter("//bin:bin")
         .setList("deps", lib.getLabel().toString())
         .write();
 
   }
 
-  private ConfiguredTarget addLibWithDepOnFrameworkImportPreMigration() throws Exception {
-    scratch.file(
-        "fx/defs.bzl",
-        "def _custom_static_framework_import_impl(ctx):",
-        "  return [apple_common.new_objc_provider(",
-        "      framework_search_paths=depset(ctx.attr.framework_search_paths))]",
-        "custom_static_framework_import = rule(",
-        "    _custom_static_framework_import_impl,",
-        "    attrs={'framework_search_paths': attr.string_list()},",
-        ")");
-    scratch.file(
-        "fx/BUILD",
-        "load(':defs.bzl', 'custom_static_framework_import')",
-        "custom_static_framework_import(",
-        "    name = 'fx',",
-        "    framework_search_paths = ['fx/fx1.framework', 'fx/fx2.framework'],",
-        ")");
-    return createLibraryTargetWriter("//lib:lib")
-        .setAndCreateFiles("srcs", "a.m", "b.m", "private.h")
-        .setList("deps", "//fx:fx")
-        .write();
-  }
-
-  private ConfiguredTarget addLibWithDepOnFrameworkImportPostMigration() throws Exception {
+  private ConfiguredTarget addLibWithDepOnFrameworkImport() throws Exception {
     scratch.file(
         "fx/defs.bzl",
         "def _custom_static_framework_import_impl(ctx):",
@@ -566,16 +535,18 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
       throws Exception {
     scratch.file("x/a.h");
     ruleType.scratchTarget(scratch, "hdrs", "['a.h']", "includes", "['incdir']");
-    ObjcProvider provider =
+    CcCompilationContext ccCompilationContext =
         getConfiguredTarget("//x:x", getAppleCrosstoolConfiguration())
-            .get(ObjcProvider.STARLARK_CONSTRUCTOR);
+            .get(CcInfo.PROVIDER)
+            .getCcCompilationContext();
     if (privateHdr.isPresent()) {
-      assertThat(provider.header().toList())
+      assertThat(ccCompilationContext.getDeclaredIncludeSrcs().toList())
           .containsExactly(getSourceArtifact("x/a.h"), getSourceArtifact(privateHdr.get()));
     } else {
-      assertThat(provider.header().toList()).containsExactly(getSourceArtifact("x/a.h"));
+      assertThat(ccCompilationContext.getDeclaredIncludeSrcs().toList())
+          .containsExactly(getSourceArtifact("x/a.h"));
     }
-    assertThat(provider.include())
+    assertThat(ccCompilationContext.getIncludeDirs())
         .containsExactly(
             PathFragment.create("x/incdir"),
             getAppleCrosstoolConfiguration()
@@ -694,9 +665,7 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
 
   private void assertObjcProtoProviderArtifactsArePropagated(ConfiguredTarget topTarget)
       throws Exception {
-    ConfiguredTarget libTarget =
-        view.getPrerequisiteConfiguredTargetForTesting(
-            reporter, topTarget, Label.parseAbsoluteUnchecked("//libs:objc_lib"), masterConfig);
+    ConfiguredTarget libTarget = getDirectPrerequisite(topTarget, "//libs:objc_lib");
 
     ObjcProtoProvider protoProvider = libTarget.get(ObjcProtoProvider.STARLARK_CONSTRUCTOR);
     assertThat(protoProvider).isNotNull();
@@ -834,9 +803,7 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
 
     ConfiguredTarget topTarget = getConfiguredTarget("//x:x");
 
-    ConfiguredTarget libTarget =
-        view.getPrerequisiteConfiguredTargetForTesting(
-            reporter, topTarget, Label.parseAbsoluteUnchecked("//libs:objc_lib"), masterConfig);
+    ConfiguredTarget libTarget = getDirectPrerequisite(topTarget, "//libs:objc_lib");
 
     ObjcProtoProvider protoProvider = libTarget.get(ObjcProtoProvider.STARLARK_CONSTRUCTOR);
     assertThat(protoProvider).isNotNull();
@@ -902,7 +869,7 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
     assertThat(Joiner.on(" ").join(linkAction.getArguments()))
         .contains("-bundle_loader " + getBinArtifact("bin_lipobin", binTarget).getExecPath());
     assertThat(Joiner.on(" ").join(linkAction.getArguments()))
-        .contains("-Xlinker -rpath -Xlinker @loader_path/Frameworks");
+        .contains("-Wl,-rpath,@loader_path/Frameworks");
   }
 
   protected Action lipoLibAction(String libLabel) throws Exception {
@@ -1842,7 +1809,6 @@ public abstract class ObjcRuleTestCase extends BuildViewTestCase {
   }
 
   protected void checkCustomModuleMap(RuleType ruleType) throws Exception {
-    useConfiguration("--experimental_objc_enable_module_maps");
     ruleType.scratchTarget(scratch, "deps", "['//z:testModuleMap']");
     scratch.file("z/b.m");
     scratch.file("z/b.h");

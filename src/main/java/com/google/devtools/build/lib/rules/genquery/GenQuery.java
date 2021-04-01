@@ -182,7 +182,7 @@ public class GenQuery implements RuleConfiguredTargetFactory {
 
     GenQueryResult result;
     try (SilentCloseable c =
-        Profiler.instance().profile("GenQuery.executeQuery/" + ruleContext.getLabel())) {
+        Profiler.instance().profile("GenQuery.executeQuery " + ruleContext.getLabel())) {
       result =
           executeQuery(
               ruleContext,
@@ -213,9 +213,9 @@ public class GenQuery implements RuleConfiguredTargetFactory {
                         ruleContext.getConfiguration().legacyExternalRunfiles())
                     .addTransitiveArtifacts(filesToBuild)
                     .build()))
+        .setPropagateValidationActionOutputGroup(false)
         .build();
   }
-
 
   /**
    * DO NOT USE! We should get rid of this method: errors reported directly to this object don't set
@@ -246,7 +246,7 @@ public class GenQuery implements RuleConfiguredTargetFactory {
     }
     for (SkyValue value : transitiveTargetValues.values()) {
       TransitiveTargetValue transNode = (TransitiveTargetValue) value;
-      if (transNode.getTransitiveRootCauses() != null) {
+      if (transNode.encounteredLoadingError()) {
         // This should only happen if the unsuccessful package was loaded in a non-selected
         // path, as otherwise this configured target would have failed earlier. See b/34132681.
         throw new BrokenQueryScopeException(
@@ -383,7 +383,7 @@ public class GenQuery implements RuleConfiguredTargetFactory {
       QueryExpression expr = QueryExpression.parse(query, queryEnvironment);
       formatter.verifyCompatible(queryEnvironment, expr);
       targets =
-          graphlessQuery && queryOptions.forceSortForGraphlessGenquery
+          graphlessQuery && !expr.isTopLevelSomePathFunction()
               ? QueryUtil.newLexicographicallySortedTargetAggregator()
               : QueryUtil.newOrderedAggregateAllOutputFormatterCallback(queryEnvironment);
       queryResult = queryEnvironment.evaluateQuery(expr, targets);

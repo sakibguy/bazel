@@ -16,8 +16,8 @@ package com.google.devtools.build.skydoc.fakebuildapi.java;
 
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.starlarkbuildapi.FileApi;
+import com.google.devtools.build.lib.starlarkbuildapi.FilesToRunProviderApi;
 import com.google.devtools.build.lib.starlarkbuildapi.java.JavaToolchainStarlarkApiProviderApi;
-import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Printer;
 import net.starlark.java.eval.Sequence;
 
@@ -30,11 +30,6 @@ final class FakeJavaToolchainStarlarkApiProviderApi implements JavaToolchainStar
 
   @Override
   public String getTargetVersion() {
-    return null;
-  }
-
-  @Override
-  public FileApi getJavacJar() {
     return null;
   }
 
@@ -54,22 +49,27 @@ final class FakeJavaToolchainStarlarkApiProviderApi implements JavaToolchainStar
   }
 
   @Override
-  public Depset getStarlarkTools() {
+  public FilesToRunProviderApi<?> getJacocoRunner() {
     return null;
   }
 
   @Override
-  public String toProto() throws EvalException {
-    return "";
-  }
-
-  @Override
-  public String toJson() throws EvalException {
-    return "";
+  public Depset getStarlarkTools() {
+    return null;
   }
 
   @Override
   public void repr(Printer printer) {}
 
   private FakeJavaToolchainStarlarkApiProviderApi() {}
+
+  @Override
+  public String toProto() {
+    return null;
+  }
+
+  @Override
+  public String toJson() {
+    return null;
+  }
 }

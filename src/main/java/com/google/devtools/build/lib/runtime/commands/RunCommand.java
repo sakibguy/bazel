@@ -24,6 +24,7 @@ import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.actions.ArtifactPathResolver;
 import com.google.devtools.build.lib.actions.CommandLine;
 import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.actions.EnvironmentalExecException;
@@ -172,23 +173,18 @@ public class RunCommand implements BlazeCommand  {
 
   /**
    * Compute the arguments the binary should be run with by concatenating the arguments in its
-   * {@code args=} attribute and the arguments on the Blaze command line.
+   * {@code args} attribute and the arguments on the Blaze command line.
    */
   @Nullable
-  private List<String> computeArgs(CommandEnvironment env, ConfiguredTarget targetToRun,
-      List<String> commandLineArgs) {
+  private List<String> computeArgs(ConfiguredTarget targetToRun, List<String> commandLineArgs)
+      throws InterruptedException, CommandLineExpansionException {
     List<String> args = Lists.newArrayList();
 
     FilesToRunProvider provider = targetToRun.getProvider(FilesToRunProvider.class);
     RunfilesSupport runfilesSupport = provider == null ? null : provider.getRunfilesSupport();
     if (runfilesSupport != null && runfilesSupport.getArgs() != null) {
       CommandLine targetArgs = runfilesSupport.getArgs();
-      try {
-        Iterables.addAll(args, targetArgs.arguments());
-      } catch (CommandLineExpansionException e) {
-        env.getReporter().handle(Event.error("Could not expand target command line: " + e));
-        return null;
-      }
+      Iterables.addAll(args, targetArgs.arguments());
     }
     args.addAll(commandLineArgs);
     return args;
@@ -281,10 +277,17 @@ public class RunCommand implements BlazeCommand  {
     List<String> targets = (runUnder != null) && (runUnder.getLabel() != null)
         ? ImmutableList.of(targetString, runUnder.getLabel().toString())
         : ImmutableList.of(targetString);
-    BuildRequest request = BuildRequest.create(
-        this.getClass().getAnnotation(Command.class).name(), options,
-        env.getRuntime().getStartupOptionsProvider(), targets, outErr,
-        env.getCommandId(), env.getCommandStartTime());
+
+    BuildRequest request =
+        BuildRequest.builder()
+            .setCommandName(this.getClass().getAnnotation(Command.class).name())
+            .setId(env.getCommandId())
+            .setOptions(options)
+            .setStartupOptions(env.getRuntime().getStartupOptionsProvider())
+            .setOutErr(outErr)
+            .setTargets(targets)
+            .setStartTimeMillis(env.getCommandStartTime())
+            .build();
 
     currentRunUnder = runUnder;
     BuildResult result;
@@ -384,7 +387,7 @@ public class RunCommand implements BlazeCommand  {
         env.getReporter().handle(Event.error("Interrupted"));
         return BlazeCommandResult.failureDetail(
             FailureDetail.newBuilder()
-                .setInterrupted(Interrupted.newBuilder().setCode(Interrupted.Code.RUN_COMMAND))
+                .setInterrupted(Interrupted.newBuilder().setCode(Interrupted.Code.INTERRUPTED))
                 .build());
       }
     }
@@ -437,7 +440,7 @@ public class RunCommand implements BlazeCommand  {
       workingDir = env.getExecRoot();
 
       try {
-        testAction.prepare(env.getExecRoot(), /* bulkDeleter= */ null);
+        testAction.prepare(env.getExecRoot(), ArtifactPathResolver.IDENTITY, /*bulkDeleter=*/ null);
       } catch (IOException e) {
         return reportAndCreateFailureResult(
             env,
@@ -457,11 +460,19 @@ public class RunCommand implements BlazeCommand  {
       } catch (ExecException e) {
         return reportAndCreateFailureResult(
             env, Strings.nullToEmpty(e.getMessage()), Code.COMMAND_LINE_EXPANSION_FAILURE);
+      } catch (InterruptedException e) {
+        String message = "run: command line expansion interrupted";
+        env.getReporter().handle(Event.error(message));
+        return BlazeCommandResult.detailedExitCode(
+            InterruptedFailureDetails.detailedExitCode(message));
       }
     } else {
       workingDir = runfilesDir;
-      List<String> args = computeArgs(env, targetToRun, commandLineArgs);
+      if (runfilesSupport != null) {
+        runfilesSupport.getActionEnvironment().resolve(runEnvironment, env.getClientEnv());
+      }
       try {
+        List<String> args = computeArgs(targetToRun, commandLineArgs);
         constructCommandLine(
             cmdLine, prettyCmdLine, env, configuration, targetToRun, runUnderTarget, args);
       } catch (NoShellFoundException e) {
@@ -471,6 +482,14 @@ public class RunCommand implements BlazeCommand  {
                 + " --shell_executable=<path> flag to specify its path, e.g."
                 + " --shell_executable=/bin/bash",
             Code.NO_SHELL_SPECIFIED);
+      } catch (InterruptedException e) {
+        String message = "run: command line expansion interrupted";
+        env.getReporter().handle(Event.error(message));
+        return BlazeCommandResult.detailedExitCode(
+            InterruptedFailureDetails.detailedExitCode(message));
+      } catch (CommandLineExpansionException e) {
+        return reportAndCreateFailureResult(
+            env, Strings.nullToEmpty(e.getMessage()), Code.COMMAND_LINE_EXPANSION_FAILURE);
       }
     }
 
@@ -744,7 +763,7 @@ public class RunCommand implements BlazeCommand  {
       String message = "run command interrupted";
       env.getReporter().handle(Event.error(message));
       return BlazeCommandResult.detailedExitCode(
-          InterruptedFailureDetails.detailedExitCode(message, Interrupted.Code.RUN_COMMAND));
+          InterruptedFailureDetails.detailedExitCode(message));
     } catch (NoSuchTargetException | NoSuchPackageException e) {
       env.getReporter().handle(Event.error("Failed to find a target to validate. " + e));
       throw new IllegalStateException("Failed to find a target to validate", e);

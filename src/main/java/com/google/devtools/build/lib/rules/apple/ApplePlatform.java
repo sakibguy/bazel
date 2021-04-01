@@ -17,7 +17,7 @@ package com.google.devtools.build.lib.rules.apple;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
-import com.google.devtools.build.lib.packages.NativeProvider;
+import com.google.devtools.build.lib.packages.BuiltinProvider;
 import com.google.devtools.build.lib.packages.Provider;
 import com.google.devtools.build.lib.packages.StarlarkInfo;
 import com.google.devtools.build.lib.packages.StructImpl;
@@ -46,7 +46,7 @@ public enum ApplePlatform implements ApplePlatformApi {
   private static final ImmutableSet<String> IOS_DEVICE_TARGET_CPUS =
       ImmutableSet.of("ios_armv6", "ios_arm64", "ios_armv7", "ios_armv7s", "ios_arm64e");
   private static final ImmutableSet<String> WATCHOS_SIMULATOR_TARGET_CPUS =
-      ImmutableSet.of("watchos_i386", "watchos_x86_64");
+      ImmutableSet.of("watchos_i386", "watchos_x86_64", "watchos_arm64");
   private static final ImmutableSet<String> WATCHOS_DEVICE_TARGET_CPUS =
       ImmutableSet.of("watchos_armv7k", "watchos_arm64_32");
   private static final ImmutableSet<String> TVOS_SIMULATOR_TARGET_CPUS =
@@ -95,6 +95,16 @@ public enum ApplePlatform implements ApplePlatformApi {
   @Override
   public String getNameInPlist() {
     return nameInPlist;
+  }
+
+  /**
+   * Returns the platform cpu string with target environment (_device|_simulator).
+   *
+   * @param targetCpu cpu value with platform type prefix, such as 'ios_arm64'
+   */
+  public String cpuStringWithTargetEnvironmentForTargetCpu(String targetCpu) {
+    String targetEnvironment = isDevice ? "device" : "simulator";
+    return String.format("%s_%s", targetCpu, targetEnvironment);
   }
 
   /**
@@ -189,7 +199,7 @@ public enum ApplePlatform implements ApplePlatformApi {
 
   /** Returns a Starlark struct that contains the instances of this enum. */
   public static StructImpl getStarlarkStruct() {
-    Provider constructor = new NativeProvider<StructImpl>(StructImpl.class, "platforms") {};
+    Provider constructor = new BuiltinProvider<StructImpl>("platforms", StructImpl.class) {};
     HashMap<String, Object> fields = new HashMap<>();
     for (ApplePlatform type : values()) {
       fields.put(type.starlarkKey, type);
@@ -259,7 +269,7 @@ public enum ApplePlatform implements ApplePlatformApi {
 
     /** Returns a Starlark struct that contains the instances of this enum. */
     public static StructImpl getStarlarkStruct() {
-      Provider constructor = new NativeProvider<StructImpl>(StructImpl.class, "platform_types") {};
+      Provider constructor = new BuiltinProvider<StructImpl>("platform_types", StructImpl.class) {};
       HashMap<String, Object> fields = new HashMap<>();
       for (PlatformType type : values()) {
         fields.put(type.starlarkKey, type);

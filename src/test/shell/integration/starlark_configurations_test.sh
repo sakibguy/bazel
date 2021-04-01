@@ -460,14 +460,14 @@ EOF
   cat > $pkg/rules.bzl <<EOF
 def _rule_class_transition_impl(settings, attr):
     return {
-        "//command_line_option:test_arg": ["blah"]
+        "//command_line_option:platform_suffix": "blah"
     }
 
 _rule_class_transition = transition(
     implementation = _rule_class_transition_impl,
     inputs = [],
     outputs = [
-        "//command_line_option:test_arg",
+        "//command_line_option:platform_suffix",
     ],
 )
 
@@ -575,6 +575,64 @@ EOF
       --noexperimental_check_output_files \
       2>>"$TEST_log" || fail "Expected build to succeed"
   assert_equals "Value=True" "$(cat bazel-genfiles/$pkg/out-flag.txt)"
+}
+
+# Integration test for an invalid output directory from a mnemonic via a
+# transition. Integration test required because error is emitted in BuildTool.
+# Unit test for dep transition in
+# StarlarkRuleTransitionProviderTest#invalidMnemonicFromDepTransition.
+function test_invalid_mnemonic_from_transition_top_level() {
+  mkdir -p tools/allowlists/function_transition_allowlist test
+  cat > tools/allowlists/function_transition_allowlist/BUILD <<'EOF'
+package_group(
+    name = 'function_transition_allowlist',
+    packages = [
+        '//test/...',
+    ],
+)
+EOF
+  cat > test/rule.bzl <<'EOF'
+def _trans_impl(settings, attr):
+  return {'//command_line_option:cpu': '//bad:cpu'}
+
+my_transition = transition(implementation = _trans_impl, inputs = [],
+  outputs = ['//command_line_option:cpu'])
+
+def _impl(ctx):
+  return []
+
+my_rule = rule(
+  implementation = _impl,
+  cfg = my_transition,
+  attrs = {
+    '_allowlist_function_transition': attr.label(
+        default = '//tools/allowlists/function_transition_allowlist',
+    ),
+  }
+)
+EOF
+  cat > test/BUILD <<'EOF'
+load('//test:rule.bzl', 'my_rule')
+my_rule(name = 'test')
+EOF
+  bazel build //test:test >& "$TEST_log" || exit_code="$?"
+  assert_equals 2 "$exit_code" || fail "Expected exit code 2"
+  expect_log "Output directory name '//bad:cpu' specified by CppConfiguration"
+  expect_log "is invalid as part of a path: must not contain /"
+}
+
+function test_rc_flag_alias_canonicalizes() {
+  local -r pkg=$FUNCNAME
+  mkdir -p $pkg
+
+  add_to_bazelrc "build --flag_alias=drink=//$pkg:type"
+
+  write_build_setting_bzl
+
+  bazel canonicalize-flags -- --drink=coffee \
+    >& "$TEST_log" || fail "Expected success"
+
+  expect_log "--//$pkg:type=coffee"
 }
 
 run_suite "${PRODUCT_NAME} starlark configurations tests"

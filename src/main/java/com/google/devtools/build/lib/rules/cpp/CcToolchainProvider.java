@@ -23,89 +23,37 @@ import com.google.devtools.build.lib.analysis.PackageSpecificationProvider;
 import com.google.devtools.build.lib.analysis.RuleErrorConsumer;
 import com.google.devtools.build.lib.analysis.config.BuildConfiguration;
 import com.google.devtools.build.lib.analysis.config.BuildOptions;
-import com.google.devtools.build.lib.analysis.platform.ToolchainInfo;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.collect.nestedset.NestedSetBuilder;
 import com.google.devtools.build.lib.collect.nestedset.Order;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.Immutable;
+import com.google.devtools.build.lib.packages.BuiltinProvider;
+import com.google.devtools.build.lib.packages.NativeInfo;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import com.google.devtools.build.lib.rules.cpp.CcToolchain.AdditionalBuildVariablesComputer;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.FeatureConfiguration;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.Tool;
+import com.google.devtools.build.lib.rules.cpp.FdoContext.BranchFdoProfile;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
 import com.google.devtools.build.lib.starlarkbuildapi.cpp.CcToolchainProviderApi;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Starlark;
-import net.starlark.java.syntax.Location;
+import net.starlark.java.eval.StarlarkThread;
 
 /** Information about a C++ compiler used by the <code>cc_*</code> rules. */
 @Immutable
 @AutoCodec
-public final class CcToolchainProvider extends ToolchainInfo
-    implements CcToolchainProviderApi<FeatureConfigurationForStarlark>, HasCcToolchainLabel {
+public final class CcToolchainProvider extends NativeInfo
+    implements CcToolchainProviderApi<
+            FeatureConfigurationForStarlark, BranchFdoProfile, FdoContext>,
+        HasCcToolchainLabel {
 
-  /** An empty toolchain to be returned in the error case (instead of null). */
-  public static final CcToolchainProvider EMPTY_TOOLCHAIN_IS_ERROR =
-      new CcToolchainProvider(
-          /* values= */ ImmutableMap.of(),
-          /* cppConfiguration= */ null,
-          /* toolchainFeatures= */ null,
-          /* crosstoolTopPathFragment= */ null,
-          /* allFiles= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* allFilesMiddleman= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* compilerFiles= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* compilerFilesWithoutIncludes= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* stripFiles= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* objcopyFiles= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* asFiles= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* arFiles= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* linkerFiles= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* interfaceSoBuilder= */ null,
-          /* dwpFiles= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* coverageFiles= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* libcLink= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* targetLibcLink= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* staticRuntimeLinkInputs= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* staticRuntimeLinkMiddleman= */ null,
-          /* dynamicRuntimeLinkInputs= */ NestedSetBuilder.emptySet(Order.STABLE_ORDER),
-          /* dynamicRuntimeLinkMiddleman= */ null,
-          /* dynamicRuntimeSolibDir= */ PathFragment.EMPTY_FRAGMENT,
-          CcCompilationContext.EMPTY,
-          /* supportsParamFiles= */ false,
-          /* supportsHeaderParsing= */ false,
-          (buildOptions) -> CcToolchainVariables.EMPTY,
-          CcToolchainVariables.EMPTY,
-          /* builtinIncludeFiles= */ ImmutableList.of(),
-          /* targetBuiltinIncludeFiles= */ ImmutableList.of(),
-          /* linkDynamicLibraryTool= */ null,
-          /* builtInIncludeDirectories= */ ImmutableList.of(),
-          /* sysroot= */ null,
-          /* targetSysroot= */ null,
-          /* fdoContext= */ null,
-          /* isToolConfiguration= */ false,
-          /* licensesProvider= */ null,
-          /* toolPaths= */ ImmutableMap.of(),
-          /* toolchainIdentifier= */ "",
-          /* compiler= */ "",
-          /* abiGlibcVersion= */ "",
-          /* targetCpu= */ "",
-          /* targetOS= */ "",
-          /* defaultSysroot= */ PathFragment.EMPTY_FRAGMENT,
-          /* runtimeSysroot= */ PathFragment.EMPTY_FRAGMENT,
-          /* targetLibc= */ "",
-          /* hostSystemName= */ "",
-          /* ccToolchainLabel= */ null,
-          /* solibDirectory= */ "",
-          /* abi= */ "",
-          /* targetSystemName= */ "",
-          /* additionalMakeVariables= */ ImmutableMap.of(),
-          /* legacyCcFlagsMakeVariable= */ "",
-          /* allowlistForLayeringCheck= */ null,
-          /* allowListForLooseHeaderCheck= */ null);
+  public static final BuiltinProvider<CcToolchainProvider> PROVIDER =
+      new BuiltinProvider<CcToolchainProvider>("CcToolchainInfo", CcToolchainProvider.class) {};
 
   @Nullable private final CppConfiguration cppConfiguration;
   private final PathFragment crosstoolTopPathFragment;
@@ -170,8 +118,17 @@ public final class CcToolchainProvider extends ToolchainInfo
   private final PackageSpecificationProvider allowlistForLayeringCheck;
   private final PackageSpecificationProvider allowListForLooseHeaderCheck;
 
+  private final String objcopyExecutable;
+  private final String compilerExecutable;
+  private final String preprocessorExecutable;
+  private final String nmExecutable;
+  private final String objdumpExecutable;
+  private final String arExecutable;
+  private final String stripExecutable;
+  private final String ldExecutable;
+  private final String gcovExecutable;
+
   public CcToolchainProvider(
-      ImmutableMap<String, Object> values,
       @Nullable CppConfiguration cppConfiguration,
       CcToolchainFeatures toolchainFeatures,
       PathFragment crosstoolTopPathFragment,
@@ -225,8 +182,17 @@ public final class CcToolchainProvider extends ToolchainInfo
       ImmutableMap<String, String> additionalMakeVariables,
       String legacyCcFlagsMakeVariable,
       PackageSpecificationProvider allowlistForLayeringCheck,
-      PackageSpecificationProvider allowListForLooseHeaderCheck) {
-    super(values, Location.BUILTIN);
+      PackageSpecificationProvider allowListForLooseHeaderCheck,
+      String objcopyExecutable,
+      String compilerExecutable,
+      String preprocessorExecutable,
+      String nmExecutable,
+      String objdumpExecutable,
+      String arExecutable,
+      String stripExecutable,
+      String ldExecutable,
+      String gcovExecutable) {
+    super();
     this.cppConfiguration = cppConfiguration;
     this.crosstoolTopPathFragment = crosstoolTopPathFragment;
     this.allFiles = Preconditions.checkNotNull(allFiles);
@@ -284,6 +250,21 @@ public final class CcToolchainProvider extends ToolchainInfo
     this.legacyCcFlagsMakeVariable = legacyCcFlagsMakeVariable;
     this.allowlistForLayeringCheck = allowlistForLayeringCheck;
     this.allowListForLooseHeaderCheck = allowListForLooseHeaderCheck;
+
+    this.objcopyExecutable = objcopyExecutable;
+    this.compilerExecutable = compilerExecutable;
+    this.preprocessorExecutable = preprocessorExecutable;
+    this.nmExecutable = nmExecutable;
+    this.objdumpExecutable = objdumpExecutable;
+    this.arExecutable = arExecutable;
+    this.stripExecutable = stripExecutable;
+    this.ldExecutable = ldExecutable;
+    this.gcovExecutable = gcovExecutable;
+  }
+
+  @Override
+  public BuiltinProvider<CcToolchainProvider> getProvider() {
+    return PROVIDER;
   }
 
   /**
@@ -338,13 +319,9 @@ public final class CcToolchainProvider extends ToolchainInfo
    */
   public boolean shouldProcessHeaders(
       FeatureConfiguration featureConfiguration, CppConfiguration cppConfiguration) {
-    // If parse_headers_verifies_modules is switched on, we verify that headers are
-    // self-contained by building the module instead.
-    return !cppConfiguration.getParseHeadersVerifiesModules()
-        && featureConfiguration.isEnabled(CppRuleClasses.PARSE_HEADERS);
+    return featureConfiguration.isEnabled(CppRuleClasses.PARSE_HEADERS);
   }
 
-  @Override
   public void addGlobalMakeVariables(ImmutableMap.Builder<String, String> globalMakeEnvBuilder) {
     ImmutableMap.Builder<String, String> result = ImmutableMap.builder();
 
@@ -415,6 +392,15 @@ public final class CcToolchainProvider extends ToolchainInfo
    */
   @Nullable
   public String getToolPathStringOrNull(Tool tool) {
+    PathFragment toolPathFragment = getToolPathFragmentOrNull(tool);
+    return toolPathFragment == null ? null : toolPathFragment.getPathString();
+  }
+
+  @Override
+  public String getToolPathStringOrNoneForStarlark(String toolString, StarlarkThread thread)
+      throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    Tool tool = Tool.valueOf(toolString);
     PathFragment toolPathFragment = getToolPathFragmentOrNull(tool);
     return toolPathFragment == null ? null : toolPathFragment.getPathString();
   }
@@ -499,9 +485,21 @@ public final class CcToolchainProvider extends ToolchainInfo
     return stripFiles;
   }
 
+  @Override
+  public Depset getStripFilesForStarlark(StarlarkThread thread) throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    return Depset.of(Artifact.TYPE, getStripFiles());
+  }
+
   /** Returns the files necessary for an 'objcopy' invocation. */
   public NestedSet<Artifact> getObjcopyFiles() {
     return objcopyFiles;
+  }
+
+  @Override
+  public Depset getObjcopyFilesForStarlark(StarlarkThread thread) throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    return Depset.of(Artifact.TYPE, getObjcopyFiles());
   }
 
   /**
@@ -512,6 +510,12 @@ public final class CcToolchainProvider extends ToolchainInfo
     return asFiles;
   }
 
+  @Override
+  public Depset getAsFilesForStarlark(StarlarkThread thread) throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    return Depset.of(Artifact.TYPE, getAsFiles());
+  }
+
   /**
    * Returns the files necessary for an 'ar' invocation. May be empty if the CROSSTOOL file does not
    * define ar_files.
@@ -520,9 +524,21 @@ public final class CcToolchainProvider extends ToolchainInfo
     return arFiles;
   }
 
+  @Override
+  public Depset getArFilesForStarlark(StarlarkThread thread) throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    return Depset.of(Artifact.TYPE, getArFiles());
+  }
+
   /** Returns the files necessary for linking, including the files needed for libc. */
   public NestedSet<Artifact> getLinkerFiles() {
     return linkerFiles;
+  }
+
+  @Override
+  public Depset getLinkerFilesForStarlark(StarlarkThread thread) throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    return Depset.of(Artifact.TYPE, getLinkerFiles());
   }
 
   public NestedSet<Artifact> getDwpFiles() {
@@ -532,6 +548,12 @@ public final class CcToolchainProvider extends ToolchainInfo
   /** Returns the files necessary for capturing code coverage. */
   public NestedSet<Artifact> getCoverageFiles() {
     return coverageFiles;
+  }
+
+  @Override
+  public Depset getCoverageFilesForStarlark(StarlarkThread thread) throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    return Depset.of(Artifact.TYPE, getCoverageFiles());
   }
 
   public NestedSet<Artifact> getLibcLink(CppConfiguration cppConfiguration) {
@@ -624,6 +646,12 @@ public final class CcToolchainProvider extends ToolchainInfo
     return dynamicRuntimeSolibDir;
   }
 
+  @Override
+  public String getDynamicRuntimeSolibDirForStarlark(StarlarkThread thread) throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    return getDynamicRuntimeSolibDir().getPathString();
+  }
+
   /** Returns the {@code CcCompilationContext} for the toolchain. */
   public CcCompilationContext getCcCompilationContext() {
     return ccInfo.getCcCompilationContext();
@@ -671,15 +699,15 @@ public final class CcToolchainProvider extends ToolchainInfo
     return solibDirectory;
   }
 
+  @Override
+  public String getSolibDirectoryForStarlark(StarlarkThread thread) throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    return getSolibDirectory();
+  }
+
   /** Returns whether the toolchain supports dynamic linking. */
   public boolean supportsDynamicLinker(FeatureConfiguration featureConfiguration) {
     return featureConfiguration.isEnabled(CppRuleClasses.SUPPORTS_DYNAMIC_LINKER);
-  }
-
-  public boolean doNotSplitLinkingCmdline() {
-    return getFeatures()
-        .getActivatableNames()
-        .contains(CppRuleClasses.DO_NOT_SPLIT_LINKING_CMDLINE);
   }
 
   /** Returns whether the toolchain supports the --start-lib/--end-lib options. */
@@ -836,6 +864,57 @@ public final class CcToolchainProvider extends ToolchainInfo
 
   public FdoContext getFdoContext() {
     return fdoContext;
+  }
+
+  @Override
+  public FdoContext getFdoContextForStarlark(StarlarkThread thread) throws EvalException {
+    CcModule.checkPrivateStarlarkificationAllowlist(thread);
+    return fdoContext;
+  }
+
+  @Override
+  public String objcopyExecutable() {
+    return objcopyExecutable;
+  }
+
+  @Override
+  public String compilerExecutable() {
+    return compilerExecutable;
+  }
+
+  @Override
+  public String preprocessorExecutable() {
+    return preprocessorExecutable;
+  }
+
+  @Override
+  public String nmExecutable() {
+    return nmExecutable;
+  }
+
+  @Override
+  public String objdumpExecutable() {
+    return objdumpExecutable;
+  }
+
+  @Override
+  public String arExecutable() {
+    return arExecutable;
+  }
+
+  @Override
+  public String stripExecutable() {
+    return stripExecutable;
+  }
+
+  @Override
+  public String ldExecutable() {
+    return ldExecutable;
+  }
+
+  @Override
+  public String gcovExecutable() {
+    return gcovExecutable;
   }
 
   /**

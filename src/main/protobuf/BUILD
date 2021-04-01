@@ -1,6 +1,4 @@
 load("@com_google_protobuf//:protobuf.bzl", "py_proto_library")
-load("@rules_cc//cc:defs.bzl", "cc_proto_library")
-load("@rules_java//java:defs.bzl", "java_proto_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("//third_party/grpc:build_defs.bzl", "java_grpc_library")
 load("//third_party/grpc/bazel:cc_grpc_library.bzl", "cc_grpc_library")
@@ -89,10 +87,23 @@ java_library_srcs(
     deps = [":analysis_v2_java_proto"],
 )
 
+java_proto_library(
+    name = "any_java_proto",
+    deps = ["@com_google_protobuf//:any_proto"],
+)
+
+java_proto_library(
+    name = "wrappers_java_proto",
+    deps = ["@com_google_protobuf//:wrappers_proto"],
+)
+
 proto_library(
     name = "command_server_proto",
     srcs = ["command_server.proto"],
-    deps = [":failure_details_proto"],
+    deps = [
+        ":failure_details_proto",
+        "@com_google_protobuf//:any_proto",
+    ],
 )
 
 java_proto_library(

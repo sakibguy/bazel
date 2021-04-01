@@ -21,6 +21,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.devtools.build.lib.concurrent.ThreadSafety.ThreadSafe;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.util.GroupedList;
+import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
 
@@ -245,6 +246,12 @@ public interface SkyFunction {
     Map<SkyKey, SkyValue> getValues(Iterable<? extends SkyKey> depKeys) throws InterruptedException;
 
     /**
+     * Similar to getValues, but instead of returning a {@code Map<SkyKey, SkyValue>}, returns a
+     * {@code List<SkyValue>} in the order of the input {@code Iterable<SkyKey>}. b/172462551
+     */
+    List<SkyValue> getOrderedValues(Iterable<? extends SkyKey> depKeys) throws InterruptedException;
+
+    /**
      * Similar to {@link #getValues} but allows the caller to specify a set of types that are proper
      * subtypes of Exception (see {@link SkyFunctionException} for more details) to find out whether
      * any of the dependencies' evaluations resulted in exceptions of those types. The returned
@@ -253,7 +260,10 @@ public interface SkyFunction {
      * <p>Callers should prioritize their responsibility to detect and handle errors in the returned
      * map over their responsibility to return {@code null} if values are missing. This is because
      * in nokeep_going evaluations, an error from a low level dependency is given a chance to be
-     * enriched by its reverse-dependencies, if possible.
+     * enriched by its reverse-dependencies, if possible. Callers should also prioritize throwing
+     * exceptions over checking for {@link InterruptedException}, since during the error-bubbling
+     * enrichment process, the SkyFunction is interrupted after it has received the exception to
+     * prevent it from doing too much unnecessary work.
      *
      * <p>Returns a map, {@code m}. For all {@code k} in {@code depKeys}, {@code m.get(k) != null}.
      * For all {@code v} such that there is some {@code k} such that {@code m.get(k) == v}, the
@@ -304,6 +314,53 @@ public interface SkyFunction {
             throws InterruptedException;
 
     /**
+     * Similar to getValuesOrThrow, but instead of returning a {@code Map<SkyKey,
+     * ValueOrException>}, returns a {@code List<SkyValue>} in the order of the input {@code
+     * Iterable<SkyKey>}.
+     */
+    <E extends Exception> List<ValueOrException<E>> getOrderedValuesOrThrow(
+        Iterable<? extends SkyKey> depKeys, Class<E> exceptionClass) throws InterruptedException;
+
+    <E1 extends Exception, E2 extends Exception>
+        List<ValueOrException2<E1, E2>> getOrderedValuesOrThrow(
+            Iterable<? extends SkyKey> depKeys,
+            Class<E1> exceptionClass1,
+            Class<E2> exceptionClass2)
+            throws InterruptedException;
+
+    <E1 extends Exception, E2 extends Exception, E3 extends Exception>
+        List<ValueOrException3<E1, E2, E3>> getOrderedValuesOrThrow(
+            Iterable<? extends SkyKey> depKeys,
+            Class<E1> exceptionClass1,
+            Class<E2> exceptionClass2,
+            Class<E3> exceptionClass3)
+            throws InterruptedException;
+
+    <E1 extends Exception, E2 extends Exception, E3 extends Exception, E4 extends Exception>
+        List<ValueOrException4<E1, E2, E3, E4>> getOrderedValuesOrThrow(
+            Iterable<? extends SkyKey> depKeys,
+            Class<E1> exceptionClass1,
+            Class<E2> exceptionClass2,
+            Class<E3> exceptionClass3,
+            Class<E4> exceptionClass4)
+            throws InterruptedException;
+
+    <
+            E1 extends Exception,
+            E2 extends Exception,
+            E3 extends Exception,
+            E4 extends Exception,
+            E5 extends Exception>
+        List<ValueOrException5<E1, E2, E3, E4, E5>> getOrderedValuesOrThrow(
+            Iterable<? extends SkyKey> depKeys,
+            Class<E1> exceptionClass1,
+            Class<E2> exceptionClass2,
+            Class<E3> exceptionClass3,
+            Class<E4> exceptionClass4,
+            Class<E5> exceptionClass5)
+            throws InterruptedException;
+
+    /**
      * Returns whether there was a previous getValue[s][OrThrow] that indicated a missing
      * dependency. Formally, returns true iff at least one of the following occurred:
      *
@@ -314,7 +371,8 @@ public interface SkyFunction {
      *       ks.contains(k)
      * </ul>
      *
-     * <p>If this returns true, the {@link SkyFunction} must return {@code null}.
+     * <p>If this returns true, the {@link SkyFunction} must return {@code null} or throw a {@link
+     * SkyFunctionException} if it detected an error even with values missing.
      */
     boolean valuesMissing();
 
@@ -327,7 +385,8 @@ public interface SkyFunction {
     /**
      * A live view of deps known to have already been requested either through an earlier call to
      * {@link SkyFunction#compute} or inferred during change pruning. Should return {@code null} if
-     * unknown.
+     * unknown. Only for special use cases: do not use in general unless you know exactly what
+     * you're doing!
      */
     @Nullable
     default GroupedList<SkyKey> getTemporaryDirectDeps() {

@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Stream;
+import javax.annotation.CheckReturnValue;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.Immutable;
 import net.starlark.java.eval.StarlarkThread;
@@ -45,8 +46,8 @@ import net.starlark.java.syntax.SyntaxError;
  * violating assumptions.
  */
 @Immutable
+@CheckReturnValue
 public final class Event implements Serializable {
-  private int hashCode;
 
   private final EventKind kind;
 
@@ -65,6 +66,8 @@ public final class Event implements Serializable {
    * are equal is not deterministic.
    */
   private final ImmutableClassToInstanceMap<Object> properties;
+
+  private int hashCode;
 
   private Event(EventKind kind, Object message, ImmutableClassToInstanceMap<Object> properties) {
     this.kind = checkNotNull(kind);
@@ -354,6 +357,11 @@ public final class Event implements Serializable {
     return location == null
         ? of(kind, messageBytes)
         : of(kind, messageBytes, Location.class, location);
+  }
+
+  /** Constructs an event with kind {@link EventKind#FATAL}. */
+  public static Event fatal(String message) {
+    return of(EventKind.FATAL, message);
   }
 
   /** Constructs an event with kind {@link EventKind#ERROR}, with an optional {@link Location}. */

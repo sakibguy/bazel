@@ -1,9 +1,12 @@
 ---
 layout: documentation
 title: Installing Bazel on Fedora and CentOS
+category: getting-started
 ---
 
 # Installing Bazel on Fedora and CentOS
+
+This page describes how to install Bazel on Fedora and CentOS.
 
 The Bazel team does not provide official packages for Fedora and CentOS.
 Vincent Batts ([@vbatts](https://github.com/vbatts)) generously maintains
@@ -32,7 +35,7 @@ version of the Bazel package.
 
     ```bash
     dnf copr enable vbatts/bazel
-    dnf install bazel3
+    dnf install bazel4
     ```
 
 ## Installing on CentOS 7
@@ -44,5 +47,5 @@ version of the Bazel package.
 2. Run the following command:
 
     ```bash
-    yum install bazel3
+    yum install bazel4
     ```

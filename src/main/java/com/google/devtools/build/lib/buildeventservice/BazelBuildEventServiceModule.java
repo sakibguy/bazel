@@ -21,7 +21,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.devtools.build.lib.authandtls.AuthAndTLSOptions;
 import com.google.devtools.build.lib.authandtls.GoogleAuthUtils;
 import com.google.devtools.build.lib.buildeventservice.client.BuildEventServiceClient;
-import com.google.devtools.build.lib.buildeventservice.client.ManagedBuildEventServiceGrpcClient;
+import com.google.devtools.build.lib.buildeventservice.client.BuildEventServiceGrpcClient;
 import io.grpc.ManagedChannel;
 import java.io.IOException;
 import java.util.Objects;
@@ -58,7 +58,7 @@ public class BazelBuildEventServiceModule
       clearBesClient();
       config = newConfig;
       client =
-          new ManagedBuildEventServiceGrpcClient(
+          new BuildEventServiceGrpcClient(
               newGrpcChannel(besOptions, authAndTLSOptions),
               GoogleAuthUtils.newCallCredentials(authAndTLSOptions));
     }
@@ -82,7 +82,7 @@ public class BazelBuildEventServiceModule
     this.config = null;
   }
 
-  private static final ImmutableSet<String> WHITELISTED_COMMANDS =
+  private static final ImmutableSet<String> ALLOWED_COMMANDS =
       ImmutableSet.of(
           "fetch",
           "build",
@@ -95,8 +95,8 @@ public class BazelBuildEventServiceModule
           "mobile-install");
 
   @Override
-  protected Set<String> whitelistedCommands(BuildEventServiceOptions besOptions) {
-    return WHITELISTED_COMMANDS;
+  protected Set<String> allowedCommands(BuildEventServiceOptions besOptions) {
+    return ALLOWED_COMMANDS;
   }
 
   @Override

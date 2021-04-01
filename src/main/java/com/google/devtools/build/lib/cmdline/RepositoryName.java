@@ -240,37 +240,8 @@ public final class RepositoryName implements Serializable {
    * Returns the repository name, except that the main repo is conflated with the default repo
    * ({@code "@"} becomes the empty string).
    */
-  public String getDefaultCanonicalForm() {
+  public String getCanonicalForm() {
     return isMain() ? "" : getName();
-  }
-
-  /**
-   * Returns the relative path to the repository source. Returns "" for the main repository and
-   * [repository name] for external repositories.
-   */
-  public PathFragment getSourceRoot() {
-    return isDefault() || isMain()
-        ? PathFragment.EMPTY_FRAGMENT
-        : PathFragment.create(strippedName());
-  }
-
-  /**
-   * Returns the package path to the repository source. Returns "" for the main repository and
-   * external/[repository name] for external repositories.
-   */
-  public PathFragment getPackagePath() {
-    return isDefault() || isMain()
-        ? PathFragment.EMPTY_FRAGMENT
-        : LabelConstants.EXTERNAL_PACKAGE_NAME.getRelative(strippedName());
-  }
-
-  /**
-   * Returns the relative path to the repository's source for derived artifacts. This behavior is
-   * currently the same for source artifacts, but we create a new method name to keep call sites
-   * readable and not misleading.
-   */
-  public PathFragment getDerivedArtifactSourceRoot() {
-    return getSourceRoot();
   }
 
   /**

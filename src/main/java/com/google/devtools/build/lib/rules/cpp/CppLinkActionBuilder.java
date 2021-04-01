@@ -183,7 +183,7 @@ public class CppLinkActionBuilder {
 
     this.ruleErrorConsumer = ruleErrorConsumer;
     this.actionConstructionContext = actionConstructionContext;
-    repositoryName = label.getPackageIdentifier().getRepository();
+    repositoryName = label.getRepository();
   }
 
   /** Returns the action name for purposes of querying the crosstool. */
@@ -532,6 +532,10 @@ public class CppLinkActionBuilder {
       case PIC_STATIC_LIBRARY:
       case ALWAYS_LINK_STATIC_LIBRARY:
       case ALWAYS_LINK_PIC_STATIC_LIBRARY:
+      case OBJC_ARCHIVE:
+      case OBJC_FULLY_LINKED_ARCHIVE:
+      case OBJC_EXECUTABLE:
+      case OBJCPP_EXECUTABLE:
         return true;
 
       default:
@@ -868,6 +872,8 @@ public class CppLinkActionBuilder {
               getLinkType().linkerOrArchiver().equals(LinkerOrArchiver.LINKER),
               configuration.getBinDirectory(repositoryName).getExecPath(),
               output.getExecPathString(),
+              SolibSymlinkAction.getDynamicLibrarySoname(
+                  output.getRootRelativePath(), /* preserveName= */ false),
               linkType.equals(LinkTargetType.DYNAMIC_LIBRARY),
               paramFile != null ? paramFile.getExecPathString() : null,
               thinltoParamFile != null ? thinltoParamFile.getExecPathString() : null,
@@ -950,10 +956,6 @@ public class CppLinkActionBuilder {
     }
 
     linkCommandLineBuilder.setBuildVariables(buildVariables);
-    if (CppHelper.doNotSplitLinkingCmdLine(
-        actionConstructionContext.getAnalysisEnvironment().getStarlarkSemantics(), toolchain)) {
-      linkCommandLineBuilder.doNotSplitLinkingCmdLine();
-    }
     LinkCommandLine linkCommandLine = linkCommandLineBuilder.build();
 
     // Compute the set of inputs - we only need stable order here.
@@ -1309,6 +1311,7 @@ public class CppLinkActionBuilder {
    * Adds non-code files to the set of inputs. They will not be passed to the linker command line
    * unless that is explicitly modified, too.
    */
+  // TOOD: Remove and just use method for addLinkerInputs
   public CppLinkActionBuilder addNonCodeInputs(Iterable<Artifact> inputs) {
     for (Artifact input : inputs) {
       addNonCodeInput(input);
@@ -1322,11 +1325,6 @@ public class CppLinkActionBuilder {
    * line unless that is explicitly modified, too.
    */
   public CppLinkActionBuilder addNonCodeInput(Artifact input) {
-    String basename = input.getFilename();
-    Preconditions.checkArgument(!Link.ARCHIVE_LIBRARY_FILETYPES.matches(basename), basename);
-    Preconditions.checkArgument(!Link.SHARED_LIBRARY_FILETYPES.matches(basename), basename);
-    Preconditions.checkArgument(!Link.OBJECT_FILETYPES.matches(basename), basename);
-
     this.nonCodeInputs.add(input);
     return this;
   }

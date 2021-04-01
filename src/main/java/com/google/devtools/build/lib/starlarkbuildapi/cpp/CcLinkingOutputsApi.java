@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.starlarkbuildapi.cpp;
 
 import com.google.devtools.build.docgen.annot.DocCategory;
 import com.google.devtools.build.lib.starlarkbuildapi.FileApi;
+import javax.annotation.Nullable;
 import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.annot.StarlarkMethod;
 import net.starlark.java.eval.StarlarkValue;
@@ -26,7 +27,9 @@ import net.starlark.java.eval.StarlarkValue;
     category = DocCategory.BUILTIN,
     documented = true,
     doc = "Helper class containing CC compilation outputs.")
-public interface CcLinkingOutputsApi<FileT extends FileApi> extends StarlarkValue {
+public interface CcLinkingOutputsApi<
+        FileT extends FileApi, LtoBackendArtifactsT extends LtoBackendArtifactsApi<FileT>>
+    extends StarlarkValue {
   @StarlarkMethod(
       name = "library_to_link",
       structField = true,
@@ -35,7 +38,8 @@ public interface CcLinkingOutputsApi<FileT extends FileApi> extends StarlarkValu
           "<a href='LibraryToLink.html'><code>LibraryToLink</code></a> for including these outputs "
               + "in further linking.",
       documented = true)
-  LibraryToLinkApi<FileT> getLibraryToLink();
+  @Nullable
+  LibraryToLinkApi<FileT, LtoBackendArtifactsT> getLibraryToLink();
 
   @StarlarkMethod(
       name = "executable",
@@ -43,5 +47,6 @@ public interface CcLinkingOutputsApi<FileT extends FileApi> extends StarlarkValu
       allowReturnNones = true,
       doc = "<a href='File.html'><code>File</code></a> object representing the linked executable.",
       documented = true)
+  @Nullable
   FileT getExecutable();
 }

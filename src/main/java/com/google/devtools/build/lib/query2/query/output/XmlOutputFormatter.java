@@ -64,6 +64,7 @@ class XmlOutputFormatter extends AbstractUnorderedFormatter {
   private AspectResolver aspectResolver;
   private DependencyFilter dependencyFilter;
   private boolean relativeLocations;
+  private boolean displaySourceFileLocation;
   private QueryOptions queryOptions;
 
   @Override
@@ -85,6 +86,7 @@ class XmlOutputFormatter extends AbstractUnorderedFormatter {
     this.aspectResolver = aspectResolver;
     this.dependencyFilter = FormatUtils.getDependencyFilter(options);
     this.relativeLocations = options.relativeLocations;
+    this.displaySourceFileLocation = options.displaySourceFileLocation;
 
     Preconditions.checkArgument(options instanceof QueryOptions);
     this.queryOptions = (QueryOptions) options;
@@ -157,8 +159,15 @@ class XmlOutputFormatter extends AbstractUnorderedFormatter {
       elem = doc.createElement("rule");
       elem.setAttribute("class", rule.getRuleClass());
       for (Attribute attr : rule.getAttributes()) {
-        PossibleAttributeValues values = PossibleAttributeValues.forRuleAndAttribute(rule, attr);
-        if (values.getSource() == AttributeValueSource.RULE || queryOptions.xmlShowDefaultValues) {
+        AttributeValueSource attributeValueSource =
+            AttributeValueSource.forRuleAndAttribute(rule, attr);
+        if (attributeValueSource == AttributeValueSource.RULE
+            || queryOptions.xmlShowDefaultValues) {
+          // TODO(b/162524370): mayTreatMultipleAsNone should be true for types that drop multiple
+          //  values.
+          Iterable<Object> values =
+              PossibleAttributeValues.forRuleAndAttribute(
+                  rule, attr, /*mayTreatMultipleAsNone=*/ false);
           Element attrElem = createValueElement(doc, attr.getType(), values);
           attrElem.setAttribute("name", attr.getName());
           elem.appendChild(attrElem);
@@ -240,7 +249,7 @@ class XmlOutputFormatter extends AbstractUnorderedFormatter {
     }
 
     elem.setAttribute("name", target.getLabel().toString());
-    String location = FormatUtils.getLocation(target, relativeLocations);
+    String location = FormatUtils.getLocation(target, relativeLocations, displaySourceFileLocation);
     if (!queryOptions.xmlLineNumbers) {
       int firstColon = location.indexOf(':');
       if (firstColon != -1) {

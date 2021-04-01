@@ -3,7 +3,7 @@ layout: documentation
 title: Debugging remote cache hits for remote execution
 ---
 
-# Debugging remote cache hits for remote execution
+# Debugging Remote Cache Hits for Remote Execution
 
 This page describes how to check your cache hit rate and how to investigate
 cache misses in the context of remote execution.
@@ -37,7 +37,7 @@ If you are not getting the cache hit rate you are expecting, do the following:
 ### Ensure re-running the same build/test command produces cache hits
 
 1. Run the build(s) and/or test(s) that you expect to populate the cache. The
-   first time a new build is run on a particular stack, we expect no remote
+   first time a new build is run on a particular stack, you can expect no remote
    cache hits. As part of remote execution, action results are stored in the
    cache and a subsequent run should pick them up.
 
@@ -48,7 +48,7 @@ If you are not getting the cache hit rate you are expecting, do the following:
 3. Run the build(s) and test(s) that you are investigating again (on the same
    machine).
 
-4. Check the `INFO` line for cache hit rate.  If you see no processes except
+4. Check the `INFO` line for cache hit rate. If you see no processes except
    `remote cache hit`, then your cache is being correctly populated and
    accessed. In that case, skip to the next section.
 

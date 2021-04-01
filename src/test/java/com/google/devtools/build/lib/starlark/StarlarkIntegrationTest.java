@@ -25,6 +25,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.truth.Correspondence;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
+import com.google.devtools.build.lib.analysis.ConfiguredRuleClassProvider;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
 import com.google.devtools.build.lib.analysis.FileProvider;
 import com.google.devtools.build.lib.analysis.FilesToRunProvider;
@@ -40,6 +41,7 @@ import com.google.devtools.build.lib.analysis.test.AnalysisFailureInfo;
 import com.google.devtools.build.lib.analysis.test.AnalysisTestResultInfo;
 import com.google.devtools.build.lib.analysis.test.InstrumentedFilesInfo;
 import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
+import com.google.devtools.build.lib.analysis.util.DummyTestFragment;
 import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.collect.nestedset.NestedSet;
@@ -53,6 +55,7 @@ import com.google.devtools.build.lib.packages.StructImpl;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.objc.ObjcProvider;
 import com.google.devtools.build.lib.skyframe.ConfiguredTargetAndData;
+import com.google.devtools.build.lib.testutil.TestRuleClassProvider;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import java.io.IOException;
 import java.util.List;
@@ -71,6 +74,14 @@ import org.junit.runners.JUnit4;
 public class StarlarkIntegrationTest extends BuildViewTestCase {
   protected boolean keepGoing() {
     return false;
+  }
+
+  @Override
+  protected ConfiguredRuleClassProvider createRuleClassProvider() {
+    ConfiguredRuleClassProvider.Builder builder = new ConfiguredRuleClassProvider.Builder();
+    TestRuleClassProvider.addStandardRules(builder);
+    builder.addConfigurationFragment(DummyTestFragment.class);
+    return builder.build();
   }
 
   @Before
@@ -1346,7 +1357,7 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
     checkError(
         "test/starlark",
         "cr",
-        "Multiple outputs with the same key: o",
+        "Implicit output key 'o' collides with output attribute name",
         "load('//test/starlark:extension.bzl', 'custom_rule')",
         "",
         "custom_rule(name = 'cr', o = [':bar.txt'])");
@@ -2337,7 +2348,7 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
         "  return []",
         "my_transition = analysis_test_transition(",
         "    settings = {",
-        "        '//command_line_option:test_arg' : ['yeehaw'] }",
+        "        '//command_line_option:foo' : 'yeehaw' }",
         ")",
         "",
         "custom_rule = rule(",
@@ -2447,7 +2458,7 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
         "",
         "my_transition = analysis_test_transition(",
         "    settings = {",
-        "        '//command_line_option:test_arg' : ['yeehaw'] }",
+        "        '//command_line_option:foo' : 'yeehaw' }",
         ")",
         "",
         "inner_rule_test = rule(",
@@ -2513,7 +2524,7 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
     if (useTransition) {
       transitionDefinition =
           "my_transition = analysis_test_transition("
-              + "settings = {'//command_line_option:test_arg' : ['yeehaw'] })";
+              + "settings = {'//command_line_option:foo' : 'yeehaw' })";
     } else {
       transitionDefinition = "my_transition = None";
     }
@@ -2637,7 +2648,7 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
         "",
         "my_transition = analysis_test_transition(",
         "    settings = {",
-        "        '//command_line_option:test_arg' : ['yeehaw'] }",
+        "        '//command_line_option:foo' : 'yeehaw' }",
         ")",
         "dep_rule = rule(",
         "  implementation = dep_rule_impl,",
@@ -2653,7 +2664,7 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
 
     scratch.file(
         "test/BUILD",
-        "load('//test:extension.bzl', 'dep_rule', 'outer_rule_test')",
+        "load('//test:extension.bzl', 'dep_rule', 'outer_rule')",
         "",
         "outer_rule(name = 'r', dep = ':inner')",
         "dep_rule(name = 'inner')");
@@ -2700,7 +2711,6 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
         "load('//test:rules.bzl', 'my_rule', 'simple_rule')",
         "my_rule(name = 'my_rule', dep = ':dep')",
         "simple_rule(name = 'dep')");
-    setBuildLanguageOptions("--experimental_starlark_config_transitions");
 
     reporter.removeHandler(failFastHandler);
     getConfiguredTarget("//test:my_rule");
@@ -2709,7 +2719,6 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
 
   @Test
   public void testPrintFromTransitionImpl() throws Exception {
-    setBuildLanguageOptions("--experimental_starlark_config_transitions");
     scratch.file(
         "tools/allowlists/function_transition_allowlist/BUILD",
         "package_group(",
@@ -2721,13 +2730,12 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
     scratch.file(
         "test/rules.bzl",
         "def _transition_impl(settings, attr):",
-        "  print('printing from transition impl', settings['//command_line_option:test_arg'])",
-        "  return {'//command_line_option:test_arg': "
-            + "settings['//command_line_option:test_arg']+['meow']}",
+        "  print('printing from transition impl', settings['//command_line_option:foo'])",
+        "  return {'//command_line_option:foo': " + "settings['//command_line_option:foo']+'meow'}",
         "my_transition = transition(",
         "  implementation = _transition_impl,",
-        "  inputs = ['//command_line_option:test_arg'],",
-        "  outputs = ['//command_line_option:test_arg'],",
+        "  inputs = ['//command_line_option:foo'],",
+        "  outputs = ['//command_line_option:foo'],",
         ")",
         "def _rule_impl(ctx):",
         "  return []",
@@ -2748,20 +2756,19 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
         "my_rule(name = 'test', dep = ':dep')",
         "my_rule(name = 'dep')");
 
-    useConfiguration("--test_arg=meow");
+    useConfiguration("--foo=meow");
 
     getConfiguredTarget("//test");
     // Test print from top level transition
-    assertContainsEvent("printing from transition impl [\"meow\"]");
+    assertContainsEvent("printing from transition impl meow");
     // Test print from dep transition
-    assertContainsEvent("printing from transition impl [\"meow\", \"meow\"]");
+    assertContainsEvent("printing from transition impl meowmeow");
     // Test print from (non-top level) rule class transition
-    assertContainsEvent("printing from transition impl [\"meow\", \"meow\", \"meow\"]");
+    assertContainsEvent("printing from transition impl meowmeowmeow");
   }
 
   @Test
   public void testTransitionEquality() throws Exception {
-    setBuildLanguageOptions("--experimental_starlark_config_transitions");
     scratch.file(
         "tools/allowlists/function_transition_allowlist/BUILD",
         "package_group(",
@@ -2773,11 +2780,11 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
     scratch.file(
         "test/rules.bzl",
         "def _transition_impl(settings, attr):",
-        "  return {'//command_line_option:test_arg': ['meow']}",
+        "  return {'//command_line_option:foo': 'meow'}",
         "my_transition = transition(",
         "  implementation = _transition_impl,",
         "  inputs = [],",
-        "  outputs = ['//command_line_option:test_arg'],",
+        "  outputs = ['//command_line_option:foo'],",
         ")",
         "def _rule_impl(ctx):",
         "  return []",
@@ -2798,7 +2805,7 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
         "my_rule(name = 'test', dep = ':dep')",
         "my_rule(name = 'dep')");
 
-    useConfiguration("--test_arg=meow");
+    useConfiguration("--foo=meow");
 
     StarlarkDefinedConfigTransition ruleTransition =
         ((StarlarkAttributeTransitionProvider)
@@ -2850,7 +2857,6 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
         "load('//test:rules.bzl', 'my_rule', 'simple_rule')",
         "my_rule(name = 'my_rule', dep = ':dep')",
         "simple_rule(name = 'dep')");
-    setBuildLanguageOptions("--experimental_starlark_config_transitions");
 
     reporter.removeHandler(failFastHandler);
     getConfiguredTarget("//test:my_rule");
@@ -3521,7 +3527,9 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
     BuildFileContainsErrorsException e =
         assertThrows(
             BuildFileContainsErrorsException.class, () -> getTarget("//test/starlark:BUILD"));
-    assertThat(e).hasMessageThat().contains("Extension 'test/starlark/error.bzl' has errors");
+    assertThat(e)
+        .hasMessageThat()
+        .contains("compilation of module 'test/starlark/error.bzl' failed");
   }
 
   // Test for an interesting situation for the inlining implementation's attempt to process
@@ -3545,6 +3553,8 @@ public class StarlarkIntegrationTest extends BuildViewTestCase {
     BuildFileContainsErrorsException e =
         assertThrows(
             BuildFileContainsErrorsException.class, () -> getTarget("//test/starlark:BUILD"));
-    assertThat(e).hasMessageThat().contains("Extension 'test/starlark/error.bzl' has errors");
+    assertThat(e)
+        .hasMessageThat()
+        .contains("compilation of module 'test/starlark/error.bzl' failed");
   }
 }

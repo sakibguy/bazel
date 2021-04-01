@@ -17,8 +17,10 @@ package com.google.devtools.build.lib.starlarkbuildapi;
 import com.google.devtools.build.docgen.annot.DocCategory;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
 import net.starlark.java.annot.Param;
+import net.starlark.java.annot.ParamType;
 import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.annot.StarlarkMethod;
+import net.starlark.java.eval.NoneType;
 import net.starlark.java.eval.StarlarkValue;
 
 /**
@@ -55,7 +57,6 @@ public interface StarlarkConfigApi extends StarlarkValue {
       parameters = {
         @Param(
             name = FLAG_ARG,
-            type = Boolean.class,
             defaultValue = "False",
             doc = FLAG_ARG_DOC,
             named = true,
@@ -69,7 +70,6 @@ public interface StarlarkConfigApi extends StarlarkValue {
       parameters = {
         @Param(
             name = FLAG_ARG,
-            type = Boolean.class,
             defaultValue = "False",
             doc = FLAG_ARG_DOC,
             named = true,
@@ -83,21 +83,32 @@ public interface StarlarkConfigApi extends StarlarkValue {
       parameters = {
         @Param(
             name = FLAG_ARG,
-            type = Boolean.class,
             defaultValue = "False",
             doc = FLAG_ARG_DOC,
             named = true,
+            positional = false),
+        @Param(
+            name = "allow_multiple",
+            defaultValue = "False",
+            doc =
+                "If set, this flag is allowed to be set multiple times on the command line. The"
+                    + " Value of the flag as accessed in transitions and build setting"
+                    + " implementation function will be a list of strings. Insertion order and"
+                    + " repeated values are both maintained. This list can be post-processed in the"
+                    + " build setting implementation function if different behavior is desired.",
+            named = true,
             positional = false)
       })
-  BuildSettingApi stringSetting(Boolean flag);
+  BuildSettingApi stringSetting(Boolean flag, Boolean allowMultiple);
 
   @StarlarkMethod(
       name = "string_list",
-      doc = "A string list-typed build setting",
+      doc =
+          "A string list-typed build setting. On the command line pass a list using"
+              + " comma-separated value like '--//my/setting=foo,bar'.",
       parameters = {
         @Param(
             name = FLAG_ARG,
-            type = Boolean.class,
             defaultValue = "False",
             doc = FLAG_ARG_DOC,
             named = true,
@@ -122,9 +133,11 @@ public interface StarlarkConfigApi extends StarlarkValue {
       parameters = {
         @Param(
             name = "exec_group",
-            type = String.class,
+            allowedTypes = {
+              @ParamType(type = String.class),
+              @ParamType(type = NoneType.class),
+            },
             named = true,
-            noneable = true,
             defaultValue = "None",
             doc =
                 "The name of the exec group whose execution platform this transition will use. If"

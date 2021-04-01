@@ -14,11 +14,13 @@
 
 package com.google.devtools.build.lib.packages;
 
+import static com.google.common.collect.Streams.stream;
 import static com.google.devtools.build.lib.packages.Attribute.ANY_RULE;
 import static com.google.devtools.build.lib.packages.Attribute.attr;
 import static com.google.devtools.build.lib.packages.BuildType.LABEL_LIST;
-import static com.google.devtools.build.lib.packages.ExecGroup.EMPTY_EXEC_GROUP;
+import static com.google.devtools.build.lib.packages.ExecGroup.COPY_FROM_RULE_EXEC_GROUP;
 import static com.google.devtools.build.lib.packages.Type.BOOLEAN;
+import static com.google.devtools.build.lib.packages.Type.STRING;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
@@ -183,7 +185,7 @@ public class RuleClass {
     public boolean apply(Rule input) {
       PathFragment path = input.getLabel().getPackageFragment();
       if (pathSegment == ANY_SEGMENT) {
-        return path.getFirstSegment(values) != PathFragment.INVALID_SEGMENT;
+        return stream(path.segments()).anyMatch(values::contains);
       } else {
         return path.segmentCount() >= pathSegment
             && values.contains(path.getSegment(pathSegment - 1));
@@ -212,6 +214,80 @@ public class RuleClass {
     @VisibleForTesting
     public Collection<String> getValues() {
       return values;
+    }
+  }
+
+  /** Possible values for setting whether a rule uses toolchain resolution. */
+  public enum ToolchainResolutionMode {
+    /** The rule should use toolchain resolution. */
+    ENABLED,
+    /** The rule should not use toolchain resolution. */
+    DISABLED,
+    /** The rule should inherit the value from its parent rules. */
+    INHERIT;
+
+    /** Determine the correct value to use based on the current setting and the parent's value. */
+    public ToolchainResolutionMode apply(String name, ToolchainResolutionMode parent) {
+      if (this == INHERIT) {
+        return parent;
+      } else if (parent == INHERIT) {
+        return this;
+      } else if (this != parent) {
+        throw new IllegalArgumentException(
+            String.format(
+                "Rule %s has useToolchainResolution set to %s, but the parent is trying to set it"
+                    + " to %s",
+                name, this, parent));
+      }
+      return this;
+    }
+
+    public boolean isActive() {
+      switch (this) {
+        case ENABLED:
+          return true;
+        case DISABLED:
+          return false;
+        default:
+      }
+      return true; // Default is that toolchain resolution is enabled.
+    }
+  }
+
+  /** Possible values for setting whether a rule uses the toolchain transition. */
+  public enum ToolchainTransitionMode {
+    /** The rule should use the toolchain transition. */
+    ENABLED,
+    /** The rule should not use the toolchain transition. */
+    DISABLED,
+    /** The rule should inherit the value from its parent rules. */
+    INHERIT;
+
+    /** Determine the correct value to use based on the current setting and the parent's value. */
+    public ToolchainTransitionMode apply(String name, ToolchainTransitionMode parent) {
+      if (this == INHERIT) {
+        return parent;
+      } else if (parent == INHERIT) {
+        return this;
+      } else if (this != parent) {
+        throw new IllegalArgumentException(
+            String.format(
+                "Rule %s has useToolchainTransition set to %s, but the parent is trying to set it"
+                    + " to %s",
+                name, this, parent));
+      }
+      return this;
+    }
+
+    public boolean isActive() {
+      switch (this) {
+        case ENABLED:
+          return true;
+        case DISABLED:
+          return false;
+        default:
+      }
+      return false; // Default is that toolchain transition is disabled.
     }
   }
 
@@ -263,6 +339,12 @@ public class RuleClass {
    * supports, appending them to the defaults for their respective groups.
    */
   public static final String COMPATIBLE_ENVIRONMENT_ATTR = "compatible_with";
+
+  /**
+   * For Bazel's constraint system: the attribute that declares the list of constraints that the
+   * target must satisfy to be considered compatible.
+   */
+  public static final String TARGET_RESTRICTED_TO_ATTR = "target_compatible_with";
 
   /**
    * For Bazel's constraint system: the implicit attribute used to store rule class restriction
@@ -634,6 +716,8 @@ public class RuleClass {
      */
     public static final String STARLARK_BUILD_SETTING_DEFAULT_ATTR_NAME = "build_setting_default";
 
+    public static final String STARLARK_BUILD_SETTING_HELP_ATTR_NAME = "help";
+
     public static final String BUILD_SETTING_DEFAULT_NONCONFIGURABLE =
         "Build setting defaults are referenced during analysis.";
 
@@ -719,8 +803,8 @@ public class RuleClass {
 
     private final Map<String, Attribute> attributes = new LinkedHashMap<>();
     private final Set<Label> requiredToolchains = new HashSet<>();
-    private boolean useToolchainResolution = true;
-    private boolean useToolchainTransition = false;
+    private ToolchainResolutionMode useToolchainResolution = ToolchainResolutionMode.INHERIT;
+    private ToolchainTransitionMode useToolchainTransition = ToolchainTransitionMode.INHERIT;
     private final Set<Label> executionPlatformConstraints = new HashSet<>();
     private OutputFile.Kind outputFileKind = OutputFile.Kind.FILE;
     private final Map<String, ExecGroup> execGroups = new HashMap<>();
@@ -741,6 +825,9 @@ public class RuleClass {
       this.type = type;
       Preconditions.checkState(starlark || type != RuleClassType.PLACEHOLDER, name);
       this.documented = type != RuleClassType.ABSTRACT;
+      add(
+          attr("name", STRING)
+              .nonconfigurable("All rules have a non-customizable \"name\" attribute"));
       for (RuleClass parent : parents) {
         if (parent.getValidityPredicate() != PredicatesWithMessage.<Rule>alwaysTrue()) {
           setValidityPredicate(parent.getValidityPredicate());
@@ -753,11 +840,30 @@ public class RuleClass {
         supportsConstraintChecking = parent.supportsConstraintChecking;
 
         addRequiredToolchains(parent.getRequiredToolchains());
-        useToolchainResolution = parent.useToolchainResolution;
-        useToolchainTransition = parent.useToolchainTransition;
+        this.useToolchainResolution =
+            this.useToolchainResolution.apply(name, parent.useToolchainResolution);
+        this.useToolchainTransition =
+            this.useToolchainTransition.apply(name, parent.useToolchainTransition);
         addExecutionPlatformConstraints(parent.getExecutionPlatformConstraints());
         try {
-          addExecGroups(parent.getExecGroups());
+          ImmutableMap.Builder<String, ExecGroup> cleanedExecGroups = new ImmutableMap.Builder<>();
+          // For exec groups that copied toolchains and constraints from the rule, clear
+          // the toolchains and constraints. This prevents multiple inherited rule-copying exec
+          // groups with the same name from different parents from clashing. The toolchains and
+          // constraints will be overwritten with the rule's toolchains and constraints later
+          // anyway (see {@link #build}).
+          // For example, every rule that creates c++ linking actions inherits the rule-copying
+          // exec group "cpp_link". For rules that are the child of multiple of these rules,
+          // we need to clear out whatever toolchains and constraints have been copied from the rule
+          // in order to prevent clashing and fill with the the child's toolchain and constraints.
+          for (Map.Entry<String, ExecGroup> execGroup : parent.getExecGroups().entrySet()) {
+            if (execGroup.getValue().copyFromRule()) {
+              cleanedExecGroups.put(execGroup.getKey(), COPY_FROM_RULE_EXEC_GROUP);
+            } else {
+              cleanedExecGroups.put(execGroup);
+            }
+          }
+          addExecGroups(cleanedExecGroups.build());
         } catch (DuplicateExecGroupError e) {
           throw new IllegalArgumentException(
               String.format(
@@ -831,34 +937,39 @@ public class RuleClass {
 
       if (buildSetting != null) {
         Type<?> type = buildSetting.getType();
-        Attribute.Builder<?> attrBuilder =
+        Attribute.Builder<?> defaultAttrBuilder =
             attr(STARLARK_BUILD_SETTING_DEFAULT_ATTR_NAME, type)
                 .nonconfigurable(BUILD_SETTING_DEFAULT_NONCONFIGURABLE)
                 .mandatory();
         if (BuildType.isLabelType(type)) {
-          attrBuilder.allowedFileTypes(FileTypeSet.ANY_FILE);
-          attrBuilder.allowedRuleClasses(ANY_RULE);
+          defaultAttrBuilder.allowedFileTypes(FileTypeSet.ANY_FILE);
+          defaultAttrBuilder.allowedRuleClasses(ANY_RULE);
         }
-        this.add(attrBuilder);
+        this.add(defaultAttrBuilder);
+
+        this.add(
+            attr(STARLARK_BUILD_SETTING_HELP_ATTR_NAME, Type.STRING)
+                .nonconfigurable(BUILD_SETTING_DEFAULT_NONCONFIGURABLE));
 
         // Build setting rules should opt out of toolchain resolution, since they form part of the
         // configuration.
-        this.useToolchainResolution(false);
-        this.useToolchainTransition(false);
+        this.useToolchainResolution(ToolchainResolutionMode.DISABLED);
+        this.useToolchainTransition(ToolchainTransitionMode.DISABLED);
       }
 
       // Any exec groups that have entirely empty toolchains and constraints inherit the rule's
       // toolchains and constraints. Note that this isn't the same as a target's constraints which
       // also read from attributes and configuration.
       Map<String, ExecGroup> execGroupsWithInheritance = new HashMap<>();
-      ExecGroup inherited = null;
+      ExecGroup copiedFromRule = null;
       for (Map.Entry<String, ExecGroup> groupEntry : execGroups.entrySet()) {
         ExecGroup group = groupEntry.getValue();
-        if (group.equals(EMPTY_EXEC_GROUP)) {
-          if (inherited == null) {
-            inherited = ExecGroup.create(requiredToolchains, executionPlatformConstraints);
+        if (group.copyFromRule()) {
+          if (copiedFromRule == null) {
+            copiedFromRule =
+                ExecGroup.createCopied(requiredToolchains, executionPlatformConstraints);
           }
-          execGroupsWithInheritance.put(groupEntry.getKey(), inherited);
+          execGroupsWithInheritance.put(groupEntry.getKey(), copiedFromRule);
         } else {
           execGroupsWithInheritance.put(groupEntry.getKey(), group);
         }
@@ -1162,7 +1273,7 @@ public class RuleClass {
      */
     public Builder advertiseProvider(Class<?>... providers) {
       for (Class<?> provider : providers) {
-        advertisedProviders.addNative(provider);
+        advertisedProviders.addBuiltin(provider);
       }
       return this;
     }
@@ -1410,6 +1521,7 @@ public class RuleClass {
       this.supportsConstraintChecking = false;
       attributes.remove(RuleClass.COMPATIBLE_ENVIRONMENT_ATTR);
       attributes.remove(RuleClass.RESTRICTED_ENVIRONMENT_ATTR);
+      attributes.remove(RuleClass.TARGET_RESTRICTED_TO_ATTR);
       return this;
     }
 
@@ -1464,12 +1576,9 @@ public class RuleClass {
       return this;
     }
 
-    /**
-     * Adds an exec group that is empty. During {@code build()} this will be replaced by an exec
-     * group that inherits its toolchains and constraints from the rule.
-     */
+    /** Adds an exec group that copies its toolchains and constraints from the rule. */
     public Builder addExecGroup(String name) {
-      return addExecGroups(ImmutableMap.of(name, EMPTY_EXEC_GROUP));
+      return addExecGroups(ImmutableMap.of(name, COPY_FROM_RULE_EXEC_GROUP));
     }
 
     /** An error to help report {@link ExecGroup}s with the same name */
@@ -1488,15 +1597,16 @@ public class RuleClass {
 
     /**
      * Causes rules to use toolchain resolution to determine the execution platform and toolchains.
-     * Rules that are part of configuring toolchains and platforms should set this to {@code false}.
+     * Rules that are part of configuring toolchains and platforms should set this to {@code
+     * DISABLED}.
      */
-    public Builder useToolchainResolution(boolean flag) {
-      this.useToolchainResolution = flag;
+    public Builder useToolchainResolution(ToolchainResolutionMode mode) {
+      this.useToolchainResolution = mode;
       return this;
     }
 
-    public Builder useToolchainTransition(boolean flag) {
-      this.useToolchainTransition = flag;
+    public Builder useToolchainTransition(ToolchainTransitionMode mode) {
+      this.useToolchainTransition = mode;
       return this;
     }
 
@@ -1652,8 +1762,8 @@ public class RuleClass {
   private final ThirdPartyLicenseExistencePolicy thirdPartyLicenseExistencePolicy;
 
   private final ImmutableSet<Label> requiredToolchains;
-  private final boolean useToolchainResolution;
-  private final boolean useToolchainTransition;
+  private final ToolchainResolutionMode useToolchainResolution;
+  private final ToolchainTransitionMode useToolchainTransition;
   private final ImmutableSet<Label> executionPlatformConstraints;
   private final ImmutableMap<String, ExecGroup> execGroups;
 
@@ -1709,8 +1819,8 @@ public class RuleClass {
       boolean supportsConstraintChecking,
       ThirdPartyLicenseExistencePolicy thirdPartyLicenseExistencePolicy,
       Set<Label> requiredToolchains,
-      boolean useToolchainResolution,
-      boolean useToolchainTransition,
+      ToolchainResolutionMode useToolchainResolution,
+      ToolchainTransitionMode useToolchainTransition,
       Set<Label> executionPlatformConstraints,
       Map<String, ExecGroup> execGroups,
       OutputFile.Kind outputFileKind,
@@ -2053,13 +2163,13 @@ public class RuleClass {
       EventHandler eventHandler)
       throws InterruptedException, CannotPrecomputeDefaultsException {
 
-
     BitSet definedAttrIndices =
         populateDefinedRuleAttributeValues(
             rule,
             pkgBuilder.getRepositoryMapping(),
             attributeValues,
             pkgBuilder.getListInterner(),
+            pkgBuilder.getConvertedLabelsInPackage(),
             eventHandler);
     populateDefaultRuleAttributeValues(rule, pkgBuilder, definedAttrIndices, eventHandler);
     // Now that all attributes are bound to values, collect and store configurable attribute keys.
@@ -2082,6 +2192,7 @@ public class RuleClass {
       ImmutableMap<RepositoryName, RepositoryName> repositoryMapping,
       AttributeValues<T> attributeValues,
       Interner<ImmutableList<?>> listInterner,
+      HashMap<String, Label> convertedLabelsInPackage,
       EventHandler eventHandler) {
     BitSet definedAttrIndices = new BitSet();
     for (T attributeAccessor : attributeValues.getAttributeAccessors()) {
@@ -2114,7 +2225,13 @@ public class RuleClass {
       if (attributeValues.valuesAreBuildLanguageTyped()) {
         try {
           nativeAttributeValue =
-              convertFromBuildLangType(rule, attr, attributeValue, repositoryMapping, listInterner);
+              convertFromBuildLangType(
+                  rule,
+                  attr,
+                  attributeValue,
+                  repositoryMapping,
+                  listInterner,
+                  convertedLabelsInPackage);
         } catch (ConversionException e) {
           rule.reportError(String.format("%s: %s", rule.getLabel(), e.getMessage()), eventHandler);
           continue;
@@ -2127,11 +2244,6 @@ public class RuleClass {
       if (attr.getName().equals("visibility")) {
         @SuppressWarnings("unchecked")
         List<Label> vis = (List<Label>) nativeAttributeValue;
-        if (!vis.isEmpty() && vis.get(0).equals(ConstantRuleVisibility.LEGACY_PUBLIC_LABEL)) {
-          rule.reportError(
-              rule.getLabel() + ": //visibility:legacy_public only allowed in package declaration",
-              eventHandler);
-        }
         try {
           rule.setVisibility(PackageUtils.getVisibility(rule.getLabel(), vis));
         } catch (EvalException e) {
@@ -2191,12 +2303,54 @@ public class RuleClass {
       } else if (attr.isLateBound()) {
         rule.setAttributeValue(attr, attr.getLateBoundDefault(), /*explicit=*/ false);
 
-      } else if (attr.getName().equals("applicable_licenses")
-          && attr.getType() == BuildType.LICENSE) {
+      } else if (attr.getName().equals(APPLICABLE_LICENSES_ATTR)
+          && attr.getType() == BuildType.LABEL_LIST) {
         // TODO(b/149505729): Determine the right semantics for someone trying to define their own
         // attribute named applicable_licenses.
-        rule.setAttributeValue(
-            attr, pkgBuilder.getDefaultApplicableLicenses(), /*explicit=*/ false);
+        //
+        // The check here is preventing against an corner case where the license() rule can get
+        // itself as an applicable_license. This breaks the graph because there is now a self-edge.
+        //
+        // There are two ways that I can see to resolve this. The first, what is shown here, simply
+        // prunes the attribute if the source is a new-style license rule, based on what's been
+        // provided publically. This does create a tight coupling to the implementation, but this is
+        // unavoidable since licenses are no longer a first-class type but we want first class
+        // behavior in Bazel core.
+        //
+        // A different approach that would not depend on the implementation of the rule could filter
+        // the list of default_applicable_licenses and not include the license rule if it matches
+        // the name of the current rule. This obviously fixes the self-assignment rule, but the
+        // resulting graph is semantically strange. The interpretation of the graph would be that
+        // the license rule is subject to the licenses of the *other* default licenses, but not
+        // itself. That looks very odd, and it's not semantically accurate. A license rule transmits
+        // no license obligation, so the correct semantics would be to have no
+        // default_applicable_licenses applied. This begs the question, if the self-edge is
+        // detected, why not simply drop all the default_applicable_licenses attributes and avoid
+        // this oddness? That would work and fix the self-edge problem, but for nodes that don't
+        // have the self-edge problem, they would get all default_applicable_licenses and now the
+        // graph is inconsistent in that some license() rules have applicable_licenses while others
+        // do not.
+        //
+        // Another possible workaround is to leverage the fact that license() rules instantiated
+        // before the package() rule will not get default_applicable_licenses applied, and the
+        // self-edge problem cannot occur in that case. The semantics for how package() should
+        // impact rules instantiated prior are not clear and not well understood. If this
+        // modification is distasteful, leveraging the package() behavior and clarifying the
+        // semantics is an option. It's not recommended since BUILD files are not thought to be
+        // order-dependent, but they have always been, so fixing that behavior may be more important
+        // than some unfortunate code here.
+        //
+        // Breaking the encapsulation to recognize license() rules and treat them uniformly results
+        // fixes the self-edge problem and results in the simplest, semantically
+        // correct graph.
+        //
+        // TODO(b/183637322) consider this further
+        if (rule.getRuleClassObject().isBazelLicense()) {
+          // Do nothing
+        } else {
+          rule.setAttributeValue(
+              attr, pkgBuilder.getDefaultApplicableLicenses(), /*explicit=*/ false);
+        }
 
       } else if (attr.getName().equals("licenses") && attr.getType() == BuildType.LICENSE) {
         rule.setAttributeValue(
@@ -2215,10 +2369,13 @@ public class RuleClass {
     // all test labels, populated later.
     if (this.name.equals("test_suite")) {
       Attribute implicitTests = this.getAttributeByName("$implicit_tests");
-      if (implicitTests != null
-          && NonconfigurableAttributeMapper.of(rule).get("tests", BuildType.LABEL_LIST).isEmpty()) {
+      NonconfigurableAttributeMapper attributeMapper = NonconfigurableAttributeMapper.of(rule);
+      if (implicitTests != null && attributeMapper.get("tests", BuildType.LABEL_LIST).isEmpty()) {
         boolean explicit = true; // so that it appears in query output
-        rule.setAttributeValue(implicitTests, pkgBuilder.testSuiteImplicitTests, explicit);
+        rule.setAttributeValue(
+            implicitTests,
+            pkgBuilder.getTestSuiteImplicitTestsRef(attributeMapper.get("tags", Type.STRING_LIST)),
+            explicit);
       }
     }
 
@@ -2379,9 +2536,11 @@ public class RuleClass {
       Attribute attr,
       Object buildLangValue,
       ImmutableMap<RepositoryName, RepositoryName> repositoryMapping,
-      Interner<ImmutableList<?>> listInterner)
+      Interner<ImmutableList<?>> listInterner,
+      HashMap<String, Label> convertedLabelsInPackage)
       throws ConversionException {
-    LabelConversionContext context = new LabelConversionContext(rule.getLabel(), repositoryMapping);
+    LabelConversionContext context =
+        new LabelConversionContext(rule.getLabel(), repositoryMapping, convertedLabelsInPackage);
     Object converted =
         BuildType.selectableConvert(
             attr.getType(),
@@ -2635,11 +2794,11 @@ public class RuleClass {
   }
 
   public boolean useToolchainResolution() {
-    return useToolchainResolution;
+    return this.useToolchainResolution.isActive();
   }
 
   public boolean useToolchainTransition() {
-    return useToolchainTransition;
+    return this.useToolchainTransition.isActive();
   }
 
   public ImmutableSet<Label> getExecutionPlatformConstraints() {
@@ -2668,5 +2827,12 @@ public class RuleClass {
     }
 
     return true;
+  }
+
+  // Returns true if this rule is a license() rule as defined in
+  // https://docs.google.com/document/d/1uwBuhAoBNrw8tmFs-NxlssI6VRolidGYdYqagLqHWt8/edit#
+  // TODO(b/183637322) consider this further
+  public boolean isBazelLicense() {
+    return getName().equals("_license") && hasAttr("license_kinds", BuildType.LABEL_LIST);
   }
 }

@@ -16,10 +16,12 @@
 
 load(
     "@bazel_tools//tools/cpp:cc_toolchain_config_lib.bzl",
+    "action_config",
     "feature",
     "feature_set",
     "flag_group",
     "flag_set",
+    "tool",
     "tool_path",
     "variable_with_value",
     "with_feature_set",
@@ -146,6 +148,17 @@ def _impl(ctx):
         for name, path in ctx.attr.tool_paths.items()
     ]
     action_configs = []
+
+    llvm_cov_action = action_config(
+        action_name = ACTION_NAMES.llvm_cov,
+        tools = [
+            tool(
+                path = ctx.attr.tool_paths["llvm-cov"],
+            ),
+        ],
+    )
+
+    action_configs.append(llvm_cov_action)
 
     supports_pic_feature = feature(
         name = "supports_pic",
@@ -656,6 +669,32 @@ def _impl(ctx):
         ],
     )
 
+    external_include_paths_feature = feature(
+        name = "external_include_paths",
+        flag_sets = [
+            flag_set(
+                actions = [
+                    ACTION_NAMES.preprocess_assemble,
+                    ACTION_NAMES.linkstamp_compile,
+                    ACTION_NAMES.c_compile,
+                    ACTION_NAMES.cpp_compile,
+                    ACTION_NAMES.cpp_header_parsing,
+                    ACTION_NAMES.cpp_module_compile,
+                    ACTION_NAMES.clif_match,
+                    ACTION_NAMES.objc_compile,
+                    ACTION_NAMES.objcpp_compile,
+                ],
+                flag_groups = [
+                    flag_group(
+                        flags = ["-isystem", "%{external_include_paths}"],
+                        iterate_over = "external_include_paths",
+                        expand_if_available = "external_include_paths",
+                    ),
+                ],
+            ),
+        ],
+    )
+
     symbol_counts_feature = feature(
         name = "symbol_counts",
         flag_sets = [
@@ -1154,6 +1193,7 @@ def _impl(ctx):
             preprocessor_defines_feature,
             includes_feature,
             include_paths_feature,
+            external_include_paths_feature,
             fdo_instrument_feature,
             cs_fdo_instrument_feature,
             cs_fdo_optimize_feature,
@@ -1226,6 +1266,7 @@ def _impl(ctx):
         abi_version = ctx.attr.abi_version,
         abi_libc_version = ctx.attr.abi_libc_version,
         tool_paths = tool_paths,
+        builtin_sysroot = ctx.attr.builtin_sysroot,
     )
 
 cc_toolchain_config = rule(
@@ -1252,6 +1293,7 @@ cc_toolchain_config = rule(
         "coverage_compile_flags": attr.string_list(),
         "coverage_link_flags": attr.string_list(),
         "supports_start_end_lib": attr.bool(),
+        "builtin_sysroot": attr.string(),
     },
     provides = [CcToolchainConfigInfo],
 )

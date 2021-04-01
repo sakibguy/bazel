@@ -26,20 +26,24 @@ import com.google.devtools.build.lib.collect.nestedset.NestedSet;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.server.FailureDetails.WorkspaceStatus;
 import com.google.devtools.build.lib.server.FailureDetails.WorkspaceStatus.Code;
+import com.google.devtools.build.lib.skyframe.WorkspaceInfoFromDiff;
 import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.lib.util.OptionsUtils;
 import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
+import com.google.devtools.common.options.Converter;
 import com.google.devtools.common.options.Option;
 import com.google.devtools.common.options.OptionDocumentationCategory;
 import com.google.devtools.common.options.OptionEffectTag;
 import com.google.devtools.common.options.OptionsBase;
+import com.google.devtools.common.options.OptionsParsingException;
 import com.google.devtools.common.options.OptionsProvider;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
 
 /**
  * An action writing the workspace status files.
@@ -62,7 +66,7 @@ public abstract class WorkspaceStatusAction extends AbstractAction {
     @Option(
         name = "embed_label",
         defaultValue = "",
-        valueHelp = "<string>",
+        converter = OneLineStringConverter.class,
         documentationCategory = OptionDocumentationCategory.UNCATEGORIZED,
         effectTags = {OptionEffectTag.UNKNOWN},
         help = "Embed source control revision or release label in binary")
@@ -78,7 +82,7 @@ public abstract class WorkspaceStatusAction extends AbstractAction {
         help =
             "A command invoked at the beginning of the build to provide status "
                 + "information about the workspace in the form of key/value pairs.  "
-                + "See the User's Manual for the full specification. Also see"
+                + "See the User's Manual for the full specification. Also see "
                 + "tools/buildstamp/get_workspace_status for an example.")
     public PathFragment workspaceStatusCommand;
   }
@@ -174,6 +178,10 @@ public abstract class WorkspaceStatusAction extends AbstractAction {
   public interface DummyEnvironment {
     Path getWorkspace();
 
+    /** Returns optional precomputed workspace info to include in the build info event. */
+    @Nullable
+    WorkspaceInfoFromDiff getWorkspaceInfoFromDiff();
+
     String getBuildRequestId();
 
     OptionsProvider getOptions();
@@ -225,11 +233,28 @@ public abstract class WorkspaceStatusAction extends AbstractAction {
     return new ActionExecutionException(message, e, this, false, code);
   }
 
-  protected static DetailedExitCode createDetailedExitCode(String message, Code detailedCode) {
+  public static DetailedExitCode createDetailedExitCode(String message, Code detailedCode) {
     return DetailedExitCode.of(
         FailureDetail.newBuilder()
             .setMessage(message)
             .setWorkspaceStatus(WorkspaceStatus.newBuilder().setCode(detailedCode))
             .build());
+  }
+
+  /** Converter for {@code --embed_label} which rejects strings that span multiple lines. */
+  public static final class OneLineStringConverter implements Converter<String> {
+
+    @Override
+    public String convert(String input) throws OptionsParsingException {
+      if (input.contains("\n")) {
+        throw new OptionsParsingException("Value must not contain multiple lines");
+      }
+      return input;
+    }
+
+    @Override
+    public String getTypeDescription() {
+      return "a one-line string";
+    }
   }
 }

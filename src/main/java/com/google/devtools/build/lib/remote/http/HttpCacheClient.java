@@ -19,14 +19,16 @@ import com.google.auth.Credentials;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.hash.HashingOutputStream;
+import com.google.common.flogger.GoogleLogger;
 import com.google.common.io.Closeables;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
 import com.google.devtools.build.lib.remote.common.CacheNotFoundException;
+import com.google.devtools.build.lib.remote.common.RemoteActionExecutionContext;
 import com.google.devtools.build.lib.remote.common.RemoteCacheClient;
+import com.google.devtools.build.lib.remote.util.DigestOutputStream;
 import com.google.devtools.build.lib.remote.util.DigestUtil;
 import com.google.devtools.build.lib.remote.util.Utils;
 import com.google.devtools.build.lib.vfs.Path;
@@ -113,6 +115,7 @@ import javax.net.ssl.SSLEngine;
  * <p>The implementation currently does not support transfer encoding chunked.
  */
 public final class HttpCacheClient implements RemoteCacheClient {
+  private static final GoogleLogger logger = GoogleLogger.forEnclosingClass();
 
   public static final String AC_PREFIX = "ac/";
   public static final String CAS_PREFIX = "cas/";
@@ -435,16 +438,16 @@ public final class HttpCacheClient implements RemoteCacheClient {
   }
 
   @Override
-  public ListenableFuture<Void> downloadBlob(Digest digest, OutputStream out) {
-    final HashingOutputStream hashOut =
-        verifyDownloads ? digestUtil.newHashingOutputStream(out) : null;
+  public ListenableFuture<Void> downloadBlob(
+      RemoteActionExecutionContext context, Digest digest, OutputStream out) {
+    final DigestOutputStream digestOut =
+        verifyDownloads ? digestUtil.newDigestOutputStream(out) : null;
     return Futures.transformAsync(
-        get(digest, hashOut != null ? hashOut : out, /* casDownload= */ true),
+        get(digest, digestOut != null ? digestOut : out, /* casDownload= */ true),
         (v) -> {
           try {
-            if (hashOut != null) {
-              Utils.verifyBlobContents(
-                  digest.getHash(), DigestUtil.hashCodeToString(hashOut.hash()));
+            if (digestOut != null) {
+              Utils.verifyBlobContents(digest, digestOut.digest());
             }
             out.flush();
             return Futures.immediateFuture(null);
@@ -509,9 +512,16 @@ public final class HttpCacheClient implements RemoteCacheClient {
                               if (!dataWritten.get() && authTokenExpired(response)) {
                                 // The error is due to an auth token having expired. Let's try
                                 // again.
-                                refreshCredentials();
-                                getAfterCredentialRefresh(downloadCmd, outerF);
-                                return;
+                                try {
+                                  refreshCredentials();
+                                  getAfterCredentialRefresh(downloadCmd, outerF);
+                                  return;
+                                } catch (IOException e) {
+                                  cause.addSuppressed(e);
+                                } catch (RuntimeException e) {
+                                  logger.atWarning().withCause(e).log("Unexpected exception");
+                                  cause.addSuppressed(e);
+                                }
                               } else if (cacheMiss(response.status())) {
                                 outerF.setException(new CacheNotFoundException(digest));
                                 return;
@@ -564,7 +574,7 @@ public final class HttpCacheClient implements RemoteCacheClient {
 
   @Override
   public ListenableFuture<ActionResult> downloadActionResult(
-      ActionKey actionKey, boolean inlineOutErr) {
+      RemoteActionExecutionContext context, ActionKey actionKey, boolean inlineOutErr) {
     return Utils.downloadAsActionResult(
         actionKey, (digest, out) -> get(digest, out, /* casDownload= */ false));
   }
@@ -607,8 +617,15 @@ public final class HttpCacheClient implements RemoteCacheClient {
                                 // If the error is due to an expired auth token and we can reset
                                 // the input stream, then try again.
                                 if (authTokenExpired(response) && reset(in)) {
-                                  refreshCredentials();
-                                  uploadAfterCredentialRefresh(upload, result);
+                                  try {
+                                    refreshCredentials();
+                                    uploadAfterCredentialRefresh(upload, result);
+                                  } catch (IOException e) {
+                                    result.setException(e);
+                                  } catch (RuntimeException e) {
+                                    logger.atWarning().withCause(e).log("Unexpected exception");
+                                    result.setException(e);
+                                  }
                                 } else {
                                   result.setException(cause);
                                 }
@@ -654,7 +671,8 @@ public final class HttpCacheClient implements RemoteCacheClient {
   }
 
   @Override
-  public ListenableFuture<Void> uploadFile(Digest digest, Path file) {
+  public ListenableFuture<Void> uploadFile(
+      RemoteActionExecutionContext context, Digest digest, Path file) {
     try {
       return uploadAsync(
           digest.getHash(), digest.getSizeBytes(), file.getInputStream(), /* casUpload= */ true);
@@ -665,13 +683,15 @@ public final class HttpCacheClient implements RemoteCacheClient {
   }
 
   @Override
-  public ListenableFuture<Void> uploadBlob(Digest digest, ByteString data) {
+  public ListenableFuture<Void> uploadBlob(
+      RemoteActionExecutionContext context, Digest digest, ByteString data) {
     return uploadAsync(
         digest.getHash(), digest.getSizeBytes(), data.newInput(), /* casUpload= */ true);
   }
 
   @Override
-  public ListenableFuture<ImmutableSet<Digest>> findMissingDigests(Iterable<Digest> digests) {
+  public ListenableFuture<ImmutableSet<Digest>> findMissingDigests(
+      RemoteActionExecutionContext context, Iterable<Digest> digests) {
     return Futures.immediateFuture(ImmutableSet.copyOf(digests));
   }
 
@@ -689,7 +709,8 @@ public final class HttpCacheClient implements RemoteCacheClient {
   }
 
   @Override
-  public void uploadActionResult(ActionKey actionKey, ActionResult actionResult)
+  public void uploadActionResult(
+      RemoteActionExecutionContext context, ActionKey actionKey, ActionResult actionResult)
       throws IOException, InterruptedException {
     ByteString serialized = actionResult.toByteString();
     ListenableFuture<Void> uploadFuture =

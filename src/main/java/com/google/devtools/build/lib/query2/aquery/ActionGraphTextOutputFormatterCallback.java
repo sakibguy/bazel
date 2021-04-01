@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CommandAction;
 import com.google.devtools.build.lib.actions.CommandLineExpansionException;
 import com.google.devtools.build.lib.analysis.AspectValue;
+import com.google.devtools.build.lib.analysis.ConfiguredTargetValue;
 import com.google.devtools.build.lib.analysis.actions.ParameterFileWriteAction;
 import com.google.devtools.build.lib.analysis.configuredtargets.RuleConfiguredTarget;
 import com.google.devtools.build.lib.buildeventstream.BuildEvent;
@@ -34,7 +35,6 @@ import com.google.devtools.build.lib.buildeventstream.BuildEventStreamProtos;
 import com.google.devtools.build.lib.events.ExtendedEventHandler;
 import com.google.devtools.build.lib.packages.AspectDescriptor;
 import com.google.devtools.build.lib.query2.engine.QueryEnvironment.TargetAccessor;
-import com.google.devtools.build.lib.skyframe.ConfiguredTargetValue;
 import com.google.devtools.build.lib.skyframe.SkyframeExecutor;
 import com.google.devtools.build.lib.util.CommandDescriptionForm;
 import com.google.devtools.build.lib.util.CommandFailureUtils;
@@ -98,7 +98,7 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
   }
 
   private void writeAction(ActionAnalysisMetadata action, PrintStream printStream)
-      throws IOException, CommandLineExpansionException {
+      throws IOException, CommandLineExpansionException, InterruptedException {
     if (options.includeParamFiles && action instanceof ParameterFileWriteAction) {
       ParameterFileWriteAction parameterFileWriteAction = (ParameterFileWriteAction) action;
 
@@ -143,7 +143,7 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
         stringBuilder
             .append("  AspectDescriptors: [")
             .append(
-                Streams.stream(aspectDescriptors)
+                aspectDescriptors.stream()
                     .map(
                         aspectDescriptor -> {
                           StringBuilder aspectDescription = new StringBuilder();
@@ -151,11 +151,11 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
                               .append(aspectDescriptor.getAspectClass().getName())
                               .append('(')
                               .append(
-                                  Streams.stream(
-                                          aspectDescriptor
-                                              .getParameters()
-                                              .getAttributes()
-                                              .entries())
+                                  aspectDescriptor
+                                      .getParameters()
+                                      .getAttributes()
+                                      .entries()
+                                      .stream()
                                       .map(
                                           parameter ->
                                               parameter.getKey()
@@ -190,7 +190,7 @@ class ActionGraphTextOutputFormatterCallback extends AqueryThreadsafeCallback {
           .append("]\n")
           .append("  Outputs: [")
           .append(
-              Streams.stream(action.getOutputs())
+              action.getOutputs().stream()
                   .map(
                       output ->
                           output.isTreeArtifact()
