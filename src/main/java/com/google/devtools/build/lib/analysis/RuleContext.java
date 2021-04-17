@@ -679,7 +679,7 @@ public final class RuleContext extends TargetContext
   }
 
   @Override
-  public void registerAction(ActionAnalysisMetadata... action) {
+  public void registerAction(ActionAnalysisMetadata action) {
     getAnalysisEnvironment().registerAction(action);
   }
 
@@ -1109,9 +1109,11 @@ public final class RuleContext extends TargetContext
     }
 
     List<ConfiguredTargetAndData> prerequisiteConfiguredTargets;
-    // android_binary and android_test override deps to use a split transition.
+    // android_binary, android_test, and android_binary_internal override deps to use a split
+    // transition.
     if ((getRule().getRuleClass().equals("android_binary")
-            || getRule().getRuleClass().equals("android_test"))
+            || getRule().getRuleClass().equals("android_test")
+            || getRule().getRuleClass().equals("android_binary_internal"))
         && attributeName.equals("deps")
         && attributes().getAttributeDefinition(attributeName).getTransitionFactory().isSplit()) {
       // TODO(b/168038145): Restore legacy behavior of returning the prerequisites from the first

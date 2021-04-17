@@ -47,6 +47,9 @@ import com.google.devtools.build.lib.rules.apple.ApplePlatform;
 import com.google.devtools.build.lib.rules.apple.ApplePlatform.PlatformType;
 import com.google.devtools.build.lib.rules.cpp.CcCompilationHelper;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainProvider;
+import com.google.devtools.build.lib.rules.cpp.CppConfiguration;
+import com.google.devtools.build.lib.rules.cpp.CppSemantics;
+import com.google.devtools.build.lib.rules.cpp.ObjcCppSemantics;
 import com.google.devtools.build.lib.rules.objc.AppleDebugOutputsInfo.OutputType;
 import com.google.devtools.build.lib.rules.objc.CompilationSupport.ExtraLinkArgs;
 import com.google.devtools.build.lib.rules.objc.MultiArchBinarySupport.DependencySpecificConfiguration;
@@ -129,6 +132,7 @@ public class AppleBinary implements RuleConfiguredTargetFactory {
     AppleBinaryOutput appleBinaryOutput =
         linkMultiArchBinary(
             ruleContext,
+            ObjcCppSemantics.INSTANCE,
             ImmutableList.of(),
             ImmutableList.of(),
             AnalysisUtils.isStampingEnabled(ruleContext),
@@ -145,6 +149,7 @@ public class AppleBinary implements RuleConfiguredTargetFactory {
    * functionality.
    *
    * @param ruleContext the current rule context
+   * @param cppSemantics the cpp semantics to use
    * @param extraLinkopts extra linkopts to pass to the linker actions
    * @param extraLinkInputs extra input files to pass to the linker action
    * @param isStampingEnabled whether linkstamping is enabled
@@ -153,6 +158,7 @@ public class AppleBinary implements RuleConfiguredTargetFactory {
    */
   public static AppleBinaryOutput linkMultiArchBinary(
       RuleContext ruleContext,
+      CppSemantics cppSemantics,
       Iterable<String> extraLinkopts,
       Iterable<Artifact> extraLinkInputs,
       boolean isStampingEnabled,
@@ -183,7 +189,8 @@ public class AppleBinary implements RuleConfiguredTargetFactory {
           ObjcRuleClasses.intermediateArtifacts(ruleContext).combinedArchitectureBinary();
     }
 
-    MultiArchBinarySupport multiArchBinarySupport = new MultiArchBinarySupport(ruleContext);
+    MultiArchBinarySupport multiArchBinarySupport =
+        new MultiArchBinarySupport(ruleContext, cppSemantics);
 
     ImmutableSet<DependencySpecificConfiguration> dependencySpecificConfigurations =
         multiArchBinarySupport.getDependencySpecificConfigurations(
@@ -263,6 +270,8 @@ public class AppleBinary implements RuleConfiguredTargetFactory {
         dependencySpecificConfigurations) {
       AppleConfiguration childAppleConfig =
           dependencySpecificConfiguration.config().getFragment(AppleConfiguration.class);
+      CppConfiguration childCppConfig =
+          dependencySpecificConfiguration.config().getFragment(CppConfiguration.class);
       ObjcConfiguration childObjcConfig =
           dependencySpecificConfiguration.config().getFragment(ObjcConfiguration.class);
       IntermediateArtifacts intermediateArtifacts =
@@ -273,11 +282,11 @@ public class AppleBinary implements RuleConfiguredTargetFactory {
               dependencySpecificConfiguration.config());
       String arch = childAppleConfig.getSingleArchitecture();
 
-      if (childAppleConfig.getBitcodeMode() == AppleBitcodeMode.EMBEDDED) {
+      if (childCppConfig.getAppleBitcodeMode() == AppleBitcodeMode.EMBEDDED) {
         Artifact bitcodeSymbol = intermediateArtifacts.bitcodeSymbolMap();
         builder.addOutput(arch, OutputType.BITCODE_SYMBOLS, bitcodeSymbol);
       }
-      if (childObjcConfig.generateDsym()) {
+      if (childCppConfig.appleGenerateDsym()) {
         Artifact dsymBinary =
             childObjcConfig.shouldStripBinary()
                 ? intermediateArtifacts.dsymSymbolForUnstrippedBinary()
