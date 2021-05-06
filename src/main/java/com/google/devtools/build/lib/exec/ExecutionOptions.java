@@ -13,13 +13,13 @@
 // limitations under the License.
 package com.google.devtools.build.lib.exec;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.devtools.build.lib.actions.ActionExecutionContext;
 import com.google.devtools.build.lib.actions.ActionExecutionContext.ShowSubcommands;
-import com.google.devtools.build.lib.actions.LocalHostCapacity;
 import com.google.devtools.build.lib.analysis.config.PerLabelOptions;
+import com.google.devtools.build.lib.util.CpuResourceConverter;
 import com.google.devtools.build.lib.util.OptionsUtils;
+import com.google.devtools.build.lib.util.RamResourceConverter;
 import com.google.devtools.build.lib.util.RegexFilter;
 import com.google.devtools.build.lib.util.ResourceConverter;
 import com.google.devtools.build.lib.vfs.PathFragment;
@@ -443,23 +443,13 @@ public class ExecutionOptions extends OptionsBase {
   public boolean splitXmlGeneration;
 
   @Option(
-      name = "archived_tree_artifact_mnemonics_filter",
-      defaultValue = "-.*", // disabled by default
-      documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
-      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS, OptionEffectTag.EXECUTION},
-      converter = RegexFilter.RegexFilterConverter.class,
-      help =
-          "Regex filter for mnemonics of actions for which we should create archived tree"
-              + " artifacts. This option is a no-op for actions which do not generate tree"
-              + " artifacts.")
-  public RegexFilter archivedArtifactsMnemonicsFilter;
-
-  @Option(
       name = "experimental_send_archived_tree_artifact_inputs",
       defaultValue = "null",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
       effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS, OptionEffectTag.EXECUTION},
       expansion = "--archived_tree_artifact_mnemonics_filter=.*",
+      deprecationWarning =
+          "Please use --archived_tree_artifact_mnemonics_filter=.* instead of this flag.",
       help =
           "Send input tree artifacts as a single archived file rather than sending each file in the"
               + " artifact as a separate input.")
@@ -471,6 +461,8 @@ public class ExecutionOptions extends OptionsBase {
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
       effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS, OptionEffectTag.EXECUTION},
       expansion = "--archived_tree_artifact_mnemonics_filter=-.*",
+      deprecationWarning =
+          "Please use --archived_tree_artifact_mnemonics_filter=-.* instead of this flag.",
       help =
           "Send input tree artifacts as a single archived file rather than sending each file in the"
               + " artifact as a separate input.")
@@ -578,46 +570,6 @@ public class ExecutionOptions extends OptionsBase {
     public ShowSubcommandsConverter() {
       super(
           ShowSubcommands.class, "subcommand option", ShowSubcommands.TRUE, ShowSubcommands.FALSE);
-    }
-  }
-
-  /**
-   * Converter for --local_cpu_resources, which takes an integer greater than or equal to 1, or
-   * "HOST_CPUS", optionally followed by [-|*]<float>.
-   */
-  public static class CpuResourceConverter extends ResourceConverter {
-    public CpuResourceConverter() {
-      super(
-          ImmutableMap.of(
-              "HOST_CPUS",
-              () -> (int) Math.ceil(LocalHostCapacity.getLocalHostCapacity().getCpuUsage())),
-          1,
-          Integer.MAX_VALUE);
-    }
-
-    @Override
-    public String getTypeDescription() {
-      return "an integer, or \"HOST_CPUS\", optionally followed by [-|*]<float>.";
-    }
-  }
-
-  /**
-   * Converter for --local_cpu_resources, which takes an integer greater than or equal to 1, or
-   * "HOST_RAM", optionally followed by [-|*]<float>.
-   */
-  public static class RamResourceConverter extends ResourceConverter {
-    public RamResourceConverter() {
-      super(
-          ImmutableMap.of(
-              "HOST_RAM",
-              () -> (int) Math.ceil(LocalHostCapacity.getLocalHostCapacity().getMemoryMb())),
-          1,
-          Integer.MAX_VALUE);
-    }
-
-    @Override
-    public String getTypeDescription() {
-      return "an integer, or \"HOST_RAM\", optionally followed by [-|*]<float>.";
     }
   }
 }

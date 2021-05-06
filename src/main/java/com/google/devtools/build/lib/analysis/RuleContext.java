@@ -14,7 +14,8 @@
 
 package com.google.devtools.build.lib.analysis;
 
-import static com.google.devtools.build.lib.analysis.ToolchainCollection.DEFAULT_EXEC_GROUP_NAME;
+import static com.google.common.base.MoreObjects.firstNonNull;
+import static com.google.devtools.build.lib.packages.ExecGroup.DEFAULT_EXEC_GROUP_NAME;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
@@ -52,6 +53,7 @@ import com.google.devtools.build.lib.analysis.config.ConfigMatchingProvider;
 import com.google.devtools.build.lib.analysis.config.CoreOptions;
 import com.google.devtools.build.lib.analysis.config.CoreOptions.IncludeConfigFragmentsEnum;
 import com.google.devtools.build.lib.analysis.config.Fragment;
+import com.google.devtools.build.lib.analysis.config.FragmentClassSet;
 import com.google.devtools.build.lib.analysis.config.FragmentCollection;
 import com.google.devtools.build.lib.analysis.config.transitions.ConfigurationTransition;
 import com.google.devtools.build.lib.analysis.config.transitions.NoTransition;
@@ -212,7 +214,7 @@ public final class RuleContext extends TargetContext
   private final String ruleClassNameForLogging;
   private final BuildConfiguration hostConfiguration;
   private final ConfigurationFragmentPolicy configurationFragmentPolicy;
-  private final ImmutableList<Class<? extends Fragment>> universalFragments;
+  private final FragmentClassSet universalFragments;
   private final RuleErrorConsumer reporter;
   @Nullable private final ToolchainCollection<ResolvedToolchainContext> toolchainContexts;
   private final ConstraintSemantics<RuleContext> constraintSemantics;
@@ -257,7 +259,7 @@ public final class RuleContext extends TargetContext
       ListMultimap<String, ConfiguredTargetAndData> targetMap,
       ListMultimap<String, ConfiguredFilesetEntry> filesetEntryMap,
       ImmutableMap<Label, ConfigMatchingProvider> configConditions,
-      ImmutableList<Class<? extends Fragment>> universalFragments,
+      FragmentClassSet universalFragments,
       String ruleClassNameForLogging,
       ActionLookupKey actionLookupKey,
       ImmutableMap<String, Attribute> aspectAttributes,
@@ -1412,7 +1414,7 @@ public final class RuleContext extends TargetContext
       return ImmutableTable.of();
     } else {
       return parseExecProperties(
-          execProperties, toolchainContexts == null ? null : toolchainContexts.getExecGroups());
+          execProperties, toolchainContexts == null ? null : toolchainContexts.getExecGroupNames());
     }
   }
 
@@ -1859,7 +1861,7 @@ public final class RuleContext extends TargetContext
     private final AnalysisEnvironment env;
     private final Target target;
     private final ConfigurationFragmentPolicy configurationFragmentPolicy;
-    private ImmutableList<Class<? extends Fragment>> universalFragments;
+    private FragmentClassSet universalFragments;
     private final BuildConfiguration configuration;
     private final BuildConfiguration hostConfiguration;
     private final ActionLookupKey actionOwnerSymbol;
@@ -1915,7 +1917,8 @@ public final class RuleContext extends TargetContext
       Preconditions.checkNotNull(visibility);
       Preconditions.checkNotNull(constraintSemantics);
       AttributeMap attributes =
-          ConfiguredAttributeMapper.of(target.getAssociatedRule(), configConditions.asProviders());
+          ConfiguredAttributeMapper.of(
+              target.getAssociatedRule(), configConditions.asProviders(), configuration.checksum());
       checkAttributesNonEmpty(attributes);
       ListMultimap<String, ConfiguredTargetAndData> targetMap = createTargetMap();
       // This conditionally checks visibility on config_setting rules based on
@@ -1947,7 +1950,7 @@ public final class RuleContext extends TargetContext
           universalFragments,
           getRuleClassNameForLogging(),
           actionOwnerSymbol,
-          aspectAttributes != null ? aspectAttributes : ImmutableMap.<String, Attribute>of(),
+          firstNonNull(aspectAttributes, ImmutableMap.of()),
           toolchainContexts,
           constraintSemantics,
           requiredConfigFragments,
@@ -2027,7 +2030,7 @@ public final class RuleContext extends TargetContext
     }
 
     /** Sets the fragment that can be legally accessed even when not explicitly declared. */
-    public Builder setUniversalFragments(ImmutableList<Class<? extends Fragment>> fragments) {
+    public Builder setUniversalFragments(FragmentClassSet fragments) {
       // TODO(bazel-team): Add this directly to ConfigurationFragmentPolicy, so we
       // don't need separate logic specifically for checking this fragment. The challenge is
       // that we need RuleClassProvider to figure out what this fragment is, and not every
@@ -2128,8 +2131,9 @@ public final class RuleContext extends TargetContext
           ctMap.put(
               AliasProvider.getDependencyLabel(prerequisite.getConfiguredTarget()), prerequisite);
         }
-        List<FilesetEntry> entries = ConfiguredAttributeMapper.of(rule, configConditions)
-            .get(attributeName, BuildType.FILESET_ENTRY_LIST);
+        List<FilesetEntry> entries =
+            ConfiguredAttributeMapper.of(rule, configConditions, configuration.checksum())
+                .get(attributeName, BuildType.FILESET_ENTRY_LIST);
         for (FilesetEntry entry : entries) {
           if (entry.getFiles() == null) {
             Label label = entry.getSrcLabel();

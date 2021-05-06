@@ -24,7 +24,6 @@ import com.google.devtools.build.lib.analysis.platform.ConstraintValueInfo;
 import com.google.devtools.build.lib.analysis.starlark.StarlarkActionFactory;
 import com.google.devtools.build.lib.analysis.starlark.StarlarkRuleContext;
 import com.google.devtools.build.lib.cmdline.Label;
-import com.google.devtools.build.lib.collect.nestedset.Depset;
 import com.google.devtools.build.lib.packages.BazelModuleContext;
 import com.google.devtools.build.lib.packages.Provider;
 import com.google.devtools.build.lib.rules.cpp.CcInfo;
@@ -52,7 +51,8 @@ public class JavaStarlarkCommon
   private static final ImmutableSet<String> PRIVATE_STARLARKIFICATION_ALLOWLIST =
       ImmutableSet.of(
           "@_builtins//bazel_internal/test_rules/java:java_library.bzl",
-          "//tools/build_defs/java:java_library.bzl");
+          "//tools/build_defs/java:java_library.bzl",
+          "//tools/build_defs/java:java_common.bzl");
 
   public JavaStarlarkCommon(JavaSemantics javaSemantics) {
     this.javaSemantics = javaSemantics;
@@ -273,21 +273,6 @@ public class JavaStarlarkCommon
       Object classJar,
       Object sourceJar)
       throws EvalException {
-    // No implementation in Bazel. This method not callable in Starlark except through
-    // (discouraged) use of --experimental_google_legacy_api.
-    return null;
-  }
-
-  @Override
-  public Depset /*<Artifact>*/ getCompileTimeJavaDependencyArtifacts(JavaInfo javaInfo) {
-    // No implementation in Bazel. This method not callable in Starlark except through
-    // (discouraged) use of --experimental_google_legacy_api.
-    return null;
-  }
-
-  @Override
-  public JavaInfo addCompileTimeJavaDependencyArtifacts(
-      JavaInfo javaInfo, Sequence<?> compileTimeJavaDependencyArtifacts) throws EvalException {
     // No implementation in Bazel. This method not callable in Starlark except through
     // (discouraged) use of --experimental_google_legacy_api.
     return null;
