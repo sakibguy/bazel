@@ -46,7 +46,6 @@ import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.Type;
 import com.google.devtools.build.lib.rules.cpp.CcInfo;
 import com.google.devtools.build.lib.rules.cpp.CcNativeLibraryInfo;
-import com.google.devtools.build.lib.rules.cpp.LibraryToLink;
 import com.google.devtools.build.lib.rules.java.JavaCompilationArgsProvider.ClasspathType;
 import com.google.devtools.build.lib.rules.java.JavaPluginInfo.JavaPluginData;
 import com.google.devtools.build.lib.util.FileTypeSet;
@@ -306,21 +305,6 @@ public class JavaCommon {
         }
       }
     }
-  }
-
-  /**
-   * Returns transitive Java native libraries.
-   *
-   * @see JavaNativeLibraryInfo
-   */
-  protected NestedSet<LibraryToLink> collectTransitiveJavaNativeLibraries() {
-    NativeLibraryNestedSetBuilder builder = new NativeLibraryNestedSetBuilder();
-    builder.addJavaTargets(targetsTreatedAsDeps(ClasspathType.BOTH));
-
-    if (ruleContext.getRule().isAttrDefined("data", BuildType.LABEL_LIST)) {
-      builder.addJavaTargets(ruleContext.getPrerequisites("data"));
-    }
-    return builder.build();
   }
 
   /**
@@ -715,7 +699,8 @@ public class JavaCommon {
 
     // Collect library paths from all attributes (including data)
     Iterable<? extends TransitiveInfoCollection> data;
-    if (ruleContext.getRule().isAttrDefined("data", BuildType.LABEL_LIST)) {
+    if (ruleContext.getRule().isAttrDefined("data", BuildType.LABEL_LIST)
+        && !ruleContext.getFragment(JavaConfiguration.class).dontCollectDataLibraries()) {
       data = ruleContext.getPrerequisites("data");
     } else {
       data = ImmutableList.of();
@@ -724,11 +709,6 @@ public class JavaCommon {
         CcNativeLibraryInfo.merge(
             Streams.concat(
                     Stream.of(mergedCcInfo.getCcNativeLibraryInfo()),
-                    AnalysisUtils.getProviders(
-                            Iterables.concat(deps, data), JavaNativeLibraryInfo.PROVIDER)
-                        .stream()
-                        .map(JavaNativeLibraryInfo::getTransitiveJavaNativeLibraries)
-                        .map(CcNativeLibraryInfo::new),
                     JavaInfo.getProvidersFromListOfTargets(JavaCcInfoProvider.class, data).stream()
                         .map(JavaCcInfoProvider::getCcInfo)
                         .map(CcInfo::getCcNativeLibraryInfo),
