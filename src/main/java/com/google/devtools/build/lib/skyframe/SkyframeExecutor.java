@@ -386,7 +386,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
     @Override
     public ArtifactPathResolver createPathResolverForArtifactValues(
         ActionInputMap actionInputMap,
-        Map<Artifact, ImmutableCollection<Artifact>> expandedArtifacts,
+        Map<Artifact, ImmutableCollection<? extends Artifact>> expandedArtifacts,
         Map<Artifact, ImmutableList<FilesetOutputSymlink>> filesets,
         String workspaceName)
         throws IOException {
@@ -455,7 +455,8 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
             outputArtifactsFromActionCache,
             statusReporterRef,
             this::getPathEntries,
-            PathFragment.create(directories.getRelativeOutputPath()));
+            PathFragment.create(directories.getRelativeOutputPath()),
+            syscalls);
     this.artifactFactory =
         new ArtifactFactory(
             /* execRootParent= */ directories.getExecRootBase(),
@@ -2592,7 +2593,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
   }
 
   @VisibleForTesting
-  public RuleClassProvider getRuleClassProviderForTesting() {
+  public ConfiguredRuleClassProvider getRuleClassProviderForTesting() {
     return ruleClassProvider;
   }
 

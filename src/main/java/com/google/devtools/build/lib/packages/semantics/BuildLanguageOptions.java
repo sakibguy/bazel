@@ -147,6 +147,18 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   public boolean experimentalEnableAndroidMigrationApis;
 
   @Option(
+      name = "incompatible_enable_exports_provider",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
+      effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS, OptionEffectTag.LOADING_AND_ANALYSIS},
+      metadataTags = {
+        OptionMetadataTag.INCOMPATIBLE_CHANGE,
+        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
+      },
+      help = "This flag enables exports provider and JavaInfo.transitive_exports call.")
+  public boolean incompatibleEnableExportsProvider;
+
+  @Option(
       name = "experimental_google_legacy_api",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
@@ -615,6 +627,21 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
               + " environment and inputs during execution.")
   public boolean experimentalShadowedAction;
 
+  @Option(
+      name = "incompatible_top_level_aspects_require_providers",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
+      metadataTags = {
+        OptionMetadataTag.INCOMPATIBLE_CHANGE,
+        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
+      },
+      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
+      help =
+          "If set to true, the top level aspect will honor its required providers and only run on"
+              + " top level targets whose rules' advertised providers satisfy the required"
+              + " providers of the aspect.")
+  public boolean incompatibleTopLevelAspectsRequireProviders;
+
   /**
    * An interner to reduce the number of StarlarkSemantics instances. A single Blaze instance should
    * never accumulate a large number of these and being able to shortcut on object identity makes a
@@ -635,6 +662,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
             .set(EXPERIMENTAL_BUILTINS_INJECTION_OVERRIDE, experimentalBuiltinsInjectionOverride)
             .setBool(
                 EXPERIMENTAL_ENABLE_ANDROID_MIGRATION_APIS, experimentalEnableAndroidMigrationApis)
+            .setBool(INCOMPATIBLE_ENABLE_EXPORTS_PROVIDER, incompatibleEnableExportsProvider)
             .setBool(EXPERIMENTAL_GOOGLE_LEGACY_API, experimentalGoogleLegacyApi)
             .setBool(EXPERIMENTAL_NINJA_ACTIONS, experimentalNinjaActions)
             .setBool(EXPERIMENTAL_PLATFORMS_API, experimentalPlatformsApi)
@@ -681,6 +709,9 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
             .set(MAX_COMPUTATION_STEPS, maxComputationSteps)
             .set(NESTED_SET_DEPTH_LIMIT, nestedSetDepthLimit)
             .setBool(EXPERIMENTAL_SHADOWED_ACTION, experimentalShadowedAction)
+            .setBool(
+                INCOMPATIBLE_TOP_LEVEL_ASPECTS_REQUIRE_PROVIDERS,
+                incompatibleTopLevelAspectsRequireProviders)
             .build();
     return INTERNER.intern(semantics);
   }
@@ -702,6 +733,8 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
       "-experimental_disable_external_package";
   public static final String EXPERIMENTAL_ENABLE_ANDROID_MIGRATION_APIS =
       "-experimental_enable_android_migration_apis";
+  public static final String INCOMPATIBLE_ENABLE_EXPORTS_PROVIDER =
+      "-incompatible_enable_exports_provider";
   public static final String EXPERIMENTAL_EXEC_GROUPS = "-experimental_exec_groups";
   public static final String EXPERIMENTAL_GOOGLE_LEGACY_API = "-experimental_google_legacy_api";
   public static final String EXPERIMENTAL_NINJA_ACTIONS = "-experimental_ninja_actions";
@@ -750,6 +783,8 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   public static final String INCOMPATIBLE_VISIBILITY_PRIVATE_ATTRIBUTES_AT_DEFINITION =
       "-incompatible_visibility_private_attributes_at_definition";
   public static final String EXPERIMENTAL_SHADOWED_ACTION = "-experimental_shadowed_action";
+  public static final String INCOMPATIBLE_TOP_LEVEL_ASPECTS_REQUIRE_PROVIDERS =
+      "-incompatible_top_level_aspects_require_providers";
 
   // non-booleans
   public static final StarlarkSemantics.Key<String> EXPERIMENTAL_BUILTINS_BZL_PATH =
