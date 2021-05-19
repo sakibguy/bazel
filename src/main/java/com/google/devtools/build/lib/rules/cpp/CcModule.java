@@ -775,7 +775,7 @@ public abstract class CcModule
       throws EvalException {
     return CcCompilationContext.builder(
             /* actionConstructionContext= */ null, /* configuration= */ null, /* label= */ null)
-        .mergeDependentCcCompilationContexts(
+        .addDependentCcCompilationContexts(
             Sequence.cast(compilationContexts, CcCompilationContext.class, "compilation_contexts"),
             ImmutableList.of())
         .build();
@@ -867,16 +867,31 @@ public abstract class CcModule
       checkPrivateStarlarkificationAllowlist(thread);
     }
 
-    LinkOptions options =
-        LinkOptions.of(
-            Depset.noneableCast(userLinkFlagsObject, String.class, "user_link_flags").toList(),
-            BazelStarlarkContext.from(thread).getSymbolGenerator());
+    ImmutableList.Builder<LinkOptions> optionsBuilder = ImmutableList.builder();
+    if (userLinkFlagsObject instanceof Depset || userLinkFlagsObject instanceof NoneType) {
+      LinkOptions options =
+          LinkOptions.of(
+              Depset.noneableCast(userLinkFlagsObject, String.class, "user_link_flags").toList(),
+              BazelStarlarkContext.from(thread).getSymbolGenerator());
+      optionsBuilder.add(options);
+    } else if (userLinkFlagsObject instanceof Sequence) {
+      checkPrivateStarlarkificationAllowlist(thread);
+
+      ImmutableList<Object> options =
+          Sequence.cast(userLinkFlagsObject, Object.class, "user_link_flags[]").getImmutableList();
+      for (Object optionObject : options) {
+        ImmutableList<String> option =
+            Sequence.cast(optionObject, String.class, "user_link_flags[][]").getImmutableList();
+        optionsBuilder.add(
+            LinkOptions.of(option, BazelStarlarkContext.from(thread).getSymbolGenerator()));
+      }
+    }
 
     return CcLinkingContext.LinkerInput.builder()
         .setOwner(owner)
         .addLibraries(
             Depset.noneableCast(librariesToLinkObject, LibraryToLink.class, "libraries").toList())
-        .addUserLinkFlags(ImmutableList.of(options))
+        .addUserLinkFlags(optionsBuilder.build())
         .addLinkstamps(convertToNestedSet(linkstampsObject, Linkstamp.class, "linkstamps").toList())
         .addNonCodeInputs(
             Depset.noneableCast(nonCodeInputs, Artifact.class, "additional_inputs").toList())
