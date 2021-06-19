@@ -126,9 +126,10 @@ public class DigestUtils {
    *
    * <p>This is null when the cache is disabled.
    *
-   * <p>Note that we do not use a {@link com.google.common.cache.LoadingCache} because our keys
-   * represent the paths as strings, not as {@link Path} instances. As a result, the loading
-   * function cannot actually compute the digests of the files so we have to handle this externally.
+   * <p>Note that we do not use a {@link com.github.benmanes.caffeine.cache.LoadingCache} because
+   * our keys represent the paths as strings, not as {@link Path} instances. As a result, the
+   * loading function cannot actually compute the digests of the files so we have to handle this
+   * externally.
    */
   private static Cache<CacheKey, byte[]> globalCache = null;
 
@@ -283,15 +284,5 @@ public class DigestUtils {
       return lhs;
     }
     return xor(rhs, lhs);
-  }
-
-  /**
-   * Run any pending maintenance operations on the global cache.
-   *
-   * <p>Used in tests to force caffeine to run any pending evictions.
-   */
-  @VisibleForTesting
-  static void cleanupCacheForTest() {
-    globalCache.cleanUp();
   }
 }
