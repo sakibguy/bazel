@@ -44,6 +44,7 @@ import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyFunctionException.Transience;
 import com.google.devtools.build.skyframe.SkyKey;
 import com.google.devtools.build.skyframe.SkyValue;
+import java.io.IOException;
 import java.util.Optional;
 import javax.annotation.Nullable;
 import net.starlark.java.eval.Module;
@@ -104,12 +105,16 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
       return createRuleFromSpec(repoSpec, starlarkSemantics, env);
     }
 
-    Optional<RepoSpec> result = bzlmodRepoRuleHelper.getRepoSpec(env, repositoryName);
-    if (env.valuesMissing()) {
-      return null;
-    }
-    if (result.isPresent()) {
-      return createRuleFromSpec(result.get(), starlarkSemantics, env);
+    try {
+      Optional<RepoSpec> result = bzlmodRepoRuleHelper.getRepoSpec(env, repositoryName);
+      if (env.valuesMissing()) {
+        return null;
+      }
+      if (result.isPresent()) {
+        return createRuleFromSpec(result.get(), starlarkSemantics, env);
+      }
+    } catch (IOException e) {
+      throw new BzlmodRepoRuleFunctionException(e, Transience.PERSISTENT);
     }
 
     return BzlmodRepoRuleValue.REPO_RULE_NOT_FOUND_VALUE;
@@ -127,6 +132,12 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
   private BzlmodRepoRuleValue createNativeRepoRule(
       RepoSpec repoSpec, StarlarkSemantics semantics, Environment env)
       throws InterruptedException, BzlmodRepoRuleFunctionException {
+    if (!ruleClassProvider.getRuleClassMap().containsKey(repoSpec.ruleClassName())) {
+      InvalidRuleException e =
+          new InvalidRuleException(
+              "Unrecognized native repository rule: " + repoSpec.getRuleClass());
+      throw new BzlmodRepoRuleFunctionException(e, Transience.PERSISTENT);
+    }
     RuleClass ruleClass = ruleClassProvider.getRuleClassMap().get(repoSpec.ruleClassName());
     BuildLangTypedAttributeValuesMap attributeValues =
         new BuildLangTypedAttributeValuesMap(repoSpec.attributes());
@@ -258,6 +269,10 @@ public final class BzlmodRepoRuleFunction implements SkyFunction {
     }
 
     BzlmodRepoRuleFunctionException(NoSuchPackageException e, Transience transience) {
+      super(e, transience);
+    }
+
+    BzlmodRepoRuleFunctionException(IOException e, Transience transience) {
       super(e, transience);
     }
   }

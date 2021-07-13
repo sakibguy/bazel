@@ -55,9 +55,14 @@ def _build_linking_context(ctx, feature_configuration, cc_toolchain, objc_provid
 
     for linker_input in merged_objc_library_cc_infos.linking_context.linker_inputs.to_list():
         for lib in linker_input.libraries:
-            if lib.static_library.path in archives_from_objc_library and archives_from_objc_library[lib.static_library.path]:
+            path = None
+            if lib.static_library != None:
+                path = lib.static_library.path
+            elif lib.pic_static_library != None:
+                path = lib.pic_static_library.path
+            if path in archives_from_objc_library and archives_from_objc_library[path]:
                 libraries.append(lib)
-                archives_from_objc_library[lib.static_library.path] = None
+                archives_from_objc_library[path] = None
 
     for archive in archives_from_objc_library.values():
         if archive:
@@ -161,19 +166,13 @@ def _objc_library_impl(ctx):
         linking_context = linking_context,
     )
 
-    instrumented_files_info = coverage_common.instrumented_files_info(
-        ctx = ctx,
-        source_attributes = ["srcs", "non_arc_srcs", "hdrs"],
-        dependency_attributes = ["deps", "data", "binary", "xctest_app"],
-    )
-
     return [
         DefaultInfo(files = depset(files), data_runfiles = ctx.runfiles(files = files)),
         cc_info,
         objc_provider,
         j2objc_providers[0],
         j2objc_providers[1],
-        instrumented_files_info,
+        objc_internal.instrumented_files_info(ctx = ctx, object_files = compilation_outputs.objects),
         output_group_info,
     ]
 
