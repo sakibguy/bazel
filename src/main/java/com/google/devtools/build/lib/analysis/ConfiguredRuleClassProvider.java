@@ -49,9 +49,9 @@ import com.google.devtools.build.lib.graph.Digraph;
 import com.google.devtools.build.lib.graph.Node;
 import com.google.devtools.build.lib.packages.BazelStarlarkContext;
 import com.google.devtools.build.lib.packages.NativeAspectClass;
-import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleClass.Builder.ThirdPartyLicenseExistencePolicy;
+import com.google.devtools.build.lib.packages.RuleTransitionData;
 import com.google.devtools.build.lib.packages.SymbolGenerator;
 import com.google.devtools.build.lib.starlarkbuildapi.core.Bootstrap;
 import com.google.devtools.build.lib.vfs.DigestHashFunction;
@@ -74,6 +74,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.zip.ZipEntry;
@@ -150,7 +151,7 @@ public /*final*/ class ConfiguredRuleClassProvider implements FragmentProvider {
     private final Map<Class<? extends RuleDefinition>, RuleClass> ruleMap = new HashMap<>();
     private final Digraph<Class<? extends RuleDefinition>> dependencyGraph = new Digraph<>();
     private final List<Class<? extends Fragment>> universalFragments = new ArrayList<>();
-    @Nullable private TransitionFactory<Rule> trimmingTransitionFactory = null;
+    @Nullable private TransitionFactory<RuleTransitionData> trimmingTransitionFactory = null;
     @Nullable private PatchTransition toolchainTaggedTrimmingTransition = null;
     private OptionsDiffPredicate shouldInvalidateCacheForOptionDiff =
         OptionsDiffPredicate.ALWAYS_INVALIDATE;
@@ -170,6 +171,9 @@ public /*final*/ class ConfiguredRuleClassProvider implements FragmentProvider {
 
     private ThirdPartyLicenseExistencePolicy thirdPartyLicenseExistencePolicy =
         ThirdPartyLicenseExistencePolicy.USER_CONTROLLABLE;
+
+    // TODO(b/192694287): Remove once we migrate all tests from the allowlist
+    @Nullable private Label networkAllowlistForTests;
 
     public Builder addWorkspaceFilePrefix(String contents) {
       defaultWorkspaceFilePrefix.append(contents);
@@ -363,7 +367,7 @@ public /*final*/ class ConfiguredRuleClassProvider implements FragmentProvider {
      * feature flags, and support for this transition factory will likely be removed at some point
      * in the future (whenever automatic trimming is sufficiently workable).
      */
-    public Builder addTrimmingTransitionFactory(TransitionFactory<Rule> factory) {
+    public Builder addTrimmingTransitionFactory(TransitionFactory<RuleTransitionData> factory) {
       Preconditions.checkNotNull(factory);
       Preconditions.checkArgument(!factory.isSplit());
       if (trimmingTransitionFactory == null) {
@@ -389,7 +393,8 @@ public /*final*/ class ConfiguredRuleClassProvider implements FragmentProvider {
      * @see #addTrimmingTransitionFactory(TransitionFactory)
      */
     @VisibleForTesting(/* for testing trimming transition factories without relying on prod use */ )
-    public Builder overrideTrimmingTransitionFactoryForTesting(TransitionFactory<Rule> factory) {
+    public Builder overrideTrimmingTransitionFactoryForTesting(
+        TransitionFactory<RuleTransitionData> factory) {
       trimmingTransitionFactory = null;
       return this.addTrimmingTransitionFactory(factory);
     }
@@ -572,6 +577,16 @@ public /*final*/ class ConfiguredRuleClassProvider implements FragmentProvider {
     public String getToolsRepository() {
       return toolsRepository;
     }
+
+    public Builder setNetworkAllowlistForTests(Label allowlist) {
+      networkAllowlistForTests = allowlist;
+      return this;
+    }
+
+    @Override
+    public Optional<Label> getNetworkAllowlistForTests() {
+      return Optional.ofNullable(networkAllowlistForTests);
+    }
   }
 
   /** Default content that should be added at the beginning of the WORKSPACE file. */
@@ -629,7 +644,7 @@ public /*final*/ class ConfiguredRuleClassProvider implements FragmentProvider {
   private final Map<String, Class<? extends Fragment>> optionsToFragmentMap;
 
   /** The transition factory used to produce the transition that will trim targets. */
-  @Nullable private final TransitionFactory<Rule> trimmingTransitionFactory;
+  @Nullable private final TransitionFactory<RuleTransitionData> trimmingTransitionFactory;
 
   /** The transition to apply to toolchain deps for manual trimming. */
   @Nullable private final PatchTransition toolchainTaggedTrimmingTransition;
@@ -682,7 +697,7 @@ public /*final*/ class ConfiguredRuleClassProvider implements FragmentProvider {
       ImmutableList<Class<? extends FragmentOptions>> configurationOptions,
       FragmentClassSet configurationFragmentClasses,
       FragmentClassSet universalFragments,
-      @Nullable TransitionFactory<Rule> trimmingTransitionFactory,
+      @Nullable TransitionFactory<RuleTransitionData> trimmingTransitionFactory,
       PatchTransition toolchainTaggedTrimmingTransition,
       OptionsDiffPredicate shouldInvalidateCacheForOptionDiff,
       PrerequisiteValidator prerequisiteValidator,
@@ -830,7 +845,7 @@ public /*final*/ class ConfiguredRuleClassProvider implements FragmentProvider {
    * trimming is sufficiently workable
    */
   @Nullable
-  public TransitionFactory<Rule> getTrimmingTransitionFactory() {
+  public TransitionFactory<RuleTransitionData> getTrimmingTransitionFactory() {
     return trimmingTransitionFactory;
   }
 
