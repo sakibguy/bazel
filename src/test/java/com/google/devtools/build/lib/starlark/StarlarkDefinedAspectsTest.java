@@ -5050,8 +5050,14 @@ public class StarlarkDefinedAspectsTest extends AnalysisTestCase {
             "aspect a3 on target //test:main sees a1p = a1p_val and sees a2p = a2p_val");
   }
 
+  /**
+   * --aspects = a1, a2, a1: aspect a1 requires a2p, a2 provides a2p.
+   *
+   * <p>top level aspects list is deduplicated by default and only the first occurrence of a1 will
+   * be there so a1 won't get the value of a2p.
+   */
   @Test
-  public void testTopLevelAspectOnAspect_duplicateAspectsFailed() throws Exception {
+  public void testTopLevelAspectOnAspect_duplicateAspectsIgnored() throws Exception {
     scratch.file(
         "test/defs.bzl",
         "a2p = provider()",
@@ -5101,6 +5107,77 @@ public class StarlarkDefinedAspectsTest extends AnalysisTestCase {
         "simple_rule(",
         "  name = 'dep_target',",
         ")");
+
+    AnalysisResult analysisResult =
+        update(
+            ImmutableList.of("test/defs.bzl%a1", "test/defs.bzl%a2", "test/defs.bzl%a1"),
+            "//test:main");
+
+    Map<AspectKey, ConfiguredAspect> configuredAspects = analysisResult.getAspectsMap();
+    ConfiguredAspect a1 = getConfiguredAspect(configuredAspects, "a1");
+    assertThat(a1).isNotNull();
+    StarlarkProvider.Key a1Result =
+        new StarlarkProvider.Key(
+            Label.parseAbsolute("//test:defs.bzl", ImmutableMap.of()), "a1_result");
+    StructImpl a1ResultProvider = (StructImpl) a1.get(a1Result);
+    assertThat((Sequence<?>) a1ResultProvider.getValue("value"))
+        .containsExactly(
+            "aspect a1 on target //test:main cannot see a2p",
+            "aspect a1 on target //test:dep_target cannot see a2p");
+  }
+
+  @Test
+  public void testTopLevelAspectOnAspect_duplicateAspectsNotAllowed() throws Exception {
+    scratch.file(
+        "test/defs.bzl",
+        "a2p = provider()",
+        "a1_result = provider()",
+        "",
+        "def _a1_impl(target, ctx):",
+        "  result = 'aspect a1 on target {}'.format(target.label)",
+        "  if a2p in target:",
+        "    result += ' sees a2p = {}'.format(target[a2p].value)",
+        "  else:",
+        "    result += ' cannot see a2p'",
+        "  complete_result = []",
+        "  if ctx.rule.attr.deps:",
+        "    for dep in ctx.rule.attr.deps:",
+        "      complete_result.extend(dep[a1_result].value)",
+        "  complete_result.append(result)",
+        "  return [a1_result(value = complete_result)]",
+        "a1 = aspect(",
+        "  implementation = _a1_impl,",
+        "  attr_aspects = ['deps'],",
+        "  required_aspect_providers = [a2p]",
+        ")",
+        "",
+        "def _a2_impl(target, ctx):",
+        "  return [a2p(value = 'a2p_val')]",
+        "a2 = aspect(",
+        "  implementation = _a2_impl,",
+        "  attr_aspects = ['deps'],",
+        "  provides = [a2p]",
+        ")",
+        "",
+        "def _simple_rule_impl(ctx):",
+        "  pass",
+        "simple_rule = rule(",
+        "  implementation = _simple_rule_impl,",
+        "  attrs = {",
+        "    'deps': attr.label_list(),",
+        "  },",
+        ")");
+    scratch.file(
+        "test/BUILD",
+        "load('//test:defs.bzl', 'simple_rule')",
+        "simple_rule(",
+        "  name = 'main',",
+        "  deps = [':dep_target'],",
+        ")",
+        "simple_rule(",
+        "  name = 'dep_target',",
+        ")");
+    useConfiguration("--incompatible_ignore_duplicate_top_level_aspects=false");
     reporter.removeHandler(failFastHandler);
 
     // The call to `update` does not throw an exception when "--keep_going" is passed in the
@@ -5568,8 +5645,8 @@ public class StarlarkDefinedAspectsTest extends AnalysisTestCase {
     assertThat(expected)
         .hasMessageThat()
         .contains(
-            "aspect //test:defs.bzl%aspect_b was added before as a required aspect of aspect"
-                + " //test:defs.bzl%aspect_a");
+            "aspect //test:defs.bzl%aspect_b was added before as a required"
+                + " aspect of aspect //test:defs.bzl%aspect_a");
   }
 
   @Test

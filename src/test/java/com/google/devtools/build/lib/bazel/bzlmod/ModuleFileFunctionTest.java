@@ -170,7 +170,13 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
   public void testRootModule() throws Exception {
     scratch.file(
         rootDirectory.getRelative("MODULE.bazel").getPathString(),
-        "module(name='A',version='0.1',compatibility_level=4)",
+        "module(",
+        "    name='A',",
+        "    version='0.1',",
+        "    compatibility_level=4,",
+        "    toolchains_to_register=['//my:toolchain', '//my:toolchain2'],",
+        "    execution_platforms_to_register=['//my:platform', '//my:platform2'],",
+        ")",
         "bazel_dep(name='B',version='1.0')",
         "bazel_dep(name='C',version='2.0',repo_name='see')",
         "single_version_override(module_name='D',version='18')",
@@ -181,17 +187,20 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
     EvaluationResult<RootModuleFileValue> result =
-        driver.evaluate(ImmutableList.of(ModuleFileValue.keyForRootModule()), evaluationContext);
+        driver.evaluate(ImmutableList.of(ModuleFileValue.KEY_FOR_ROOT_MODULE), evaluationContext);
     if (result.hasError()) {
       fail(result.getError().toString());
     }
-    RootModuleFileValue rootModuleFileValue = result.get(ModuleFileValue.keyForRootModule());
+    RootModuleFileValue rootModuleFileValue = result.get(ModuleFileValue.KEY_FOR_ROOT_MODULE);
     assertThat(rootModuleFileValue.getModule())
         .isEqualTo(
             Module.builder()
                 .setName("A")
                 .setVersion(Version.parse("0.1"))
                 .setCompatibilityLevel(4)
+                .setExecutionPlatformsToRegister(
+                    ImmutableList.of("//my:platform", "//my:platform2"))
+                .setToolchainsToRegister(ImmutableList.of("//my:toolchain", "//my:toolchain2"))
                 .addDep("B", createModuleKey("B", "1.0"))
                 .addDep("see", createModuleKey("C", "2.0"))
                 .build());
@@ -222,11 +231,11 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
     EvaluationResult<RootModuleFileValue> result =
-        driver.evaluate(ImmutableList.of(ModuleFileValue.keyForRootModule()), evaluationContext);
+        driver.evaluate(ImmutableList.of(ModuleFileValue.KEY_FOR_ROOT_MODULE), evaluationContext);
     if (result.hasError()) {
       fail(result.getError().toString());
     }
-    RootModuleFileValue rootModuleFileValue = result.get(ModuleFileValue.keyForRootModule());
+    RootModuleFileValue rootModuleFileValue = result.get(ModuleFileValue.KEY_FOR_ROOT_MODULE);
     assertThat(rootModuleFileValue.getModule())
         .isEqualTo(Module.builder().addDep("B", createModuleKey("B", "1.0")).build());
     assertThat(rootModuleFileValue.getOverrides()).isEmpty();
@@ -243,7 +252,7 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
     EvaluationResult<RootModuleFileValue> result =
-        driver.evaluate(ImmutableList.of(ModuleFileValue.keyForRootModule()), evaluationContext);
+        driver.evaluate(ImmutableList.of(ModuleFileValue.KEY_FOR_ROOT_MODULE), evaluationContext);
     assertThat(result.hasError()).isTrue();
     assertThat(result.getError().toString()).contains("invalid override for the root module");
   }

@@ -27,6 +27,7 @@ import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.CommandAction;
 import com.google.devtools.build.lib.actions.util.ActionsTestUtil;
 import com.google.devtools.build.lib.analysis.ConfiguredTarget;
+import com.google.devtools.build.lib.analysis.DefaultInfo;
 import com.google.devtools.build.lib.analysis.OutputGroupInfo;
 import com.google.devtools.build.lib.analysis.actions.SymlinkAction;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
@@ -78,6 +79,13 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
     RULE_TYPE.scratchTarget(scratch,
         "minimum_os_version", "'8.0'",
         "platform_type", "'watchos'");
+    useConfiguration("--experimental_apple_mandatory_minimum_version");
+    getConfiguredTarget("//x:x");
+  }
+
+  @Test
+  public void testMandatoryMinimumOsVersionTrailingZeros() throws Exception {
+    RULE_TYPE.scratchTarget(scratch, "minimum_os_version", "'8.0.0'", "platform_type", "'watchos'");
     useConfiguration("--experimental_apple_mandatory_minimum_version");
     getConfiguredTarget("//x:x");
   }
@@ -195,10 +203,10 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
         (CommandAction)
             getGeneratingAction(getFirstArtifactEndingWith(action.getInputs(), "x86_64-fl.a"));
 
-    assertThat(Artifact.asExecPaths(i386BinAction.getInputs()))
-        .contains(i386Prefix + "package/libcclib.a");
-    assertThat(Artifact.asExecPaths(x8664BinAction.getInputs()))
-        .contains(x8664Prefix + "package/libcclib.a");
+    assertThat(removeConfigFragment(Artifact.asExecPaths(i386BinAction.getInputs())))
+        .contains(removeConfigFragment(i386Prefix + "package/libcclib.a"));
+    assertThat(removeConfigFragment(Artifact.asExecPaths(x8664BinAction.getInputs())))
+        .contains(removeConfigFragment(x8664Prefix + "package/libcclib.a"));
   }
 
   @Test
@@ -446,6 +454,23 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
   }
 
   @Test
+  public void testRepeatedDepsViaObjcLibraryAreNotInCommandLine() throws Exception {
+    scratch.file(
+        "package/BUILD",
+        "apple_static_library(",
+        "    name = 'test',",
+        "    deps = [':cclib', ':objcLib2'],",
+        "    platform_type = 'ios',",
+        ")",
+        "objc_library(name = 'objcLib2', srcs = [ 'b2.m' ], deps = [':objcLib'])",
+        "cc_library(name = 'cclib', srcs = ['cclib.cc'], deps = [':objcLib'])",
+        "objc_library(name = 'objcLib', srcs = [ 'b.m' ])");
+
+    CommandAction action = linkLibAction("//package:test");
+    assertThat(action.getArguments()).containsNoDuplicates();
+  }
+
+  @Test
   // Tests that if there is a cc_library in avoid_deps, and it is present in deps, it will
   // be avoided, as well as its transitive dependencies.
   public void testAvoidDepsObjects_avoidCcLibrary() throws Exception {
@@ -495,73 +520,6 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
     assertThat(compileArgs1).contains("FLAG_2_OFF");
     assertThat(compileArgs2).contains("FLAG_1_OFF");
     assertThat(compileArgs2).contains("FLAG_2_OFF");
-  }
-
-  @Test
-  public void testFeatureFlags_oneFlagOn() throws Exception {
-    useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
-    scratchFeatureFlagTestLib();
-    scratch.file(
-        "test/BUILD",
-        "apple_static_library(",
-        "    name = 'static_lib',",
-        "    deps = ['//lib:objcLib'],",
-        "    platform_type = 'ios',",
-        "    feature_flags = {",
-        "      '//lib:flag2': 'on',",
-        "    },",
-        "    transitive_configs = ['//lib:flag1', '//lib:flag2'],",
-        ")");
-
-    CommandAction linkAction = linkLibAction("//test:static_lib");
-    CommandAction objcLibArchiveAction = (CommandAction) getGeneratingAction(
-        getFirstArtifactEndingWith(linkAction.getInputs(), "libobjcLib.a"));
-
-    CommandAction flag1offCompileAction = (CommandAction) getGeneratingAction(
-        getFirstArtifactEndingWith(objcLibArchiveAction.getInputs(), "flag1off.o"));
-    CommandAction flag2onCompileAction = (CommandAction) getGeneratingAction(
-        getFirstArtifactEndingWith(objcLibArchiveAction.getInputs(), "flag2on.o"));
-
-    String compileArgs1 = Joiner.on(" ").join(flag1offCompileAction.getArguments());
-    String compileArgs2 = Joiner.on(" ").join(flag2onCompileAction.getArguments());
-    assertThat(compileArgs1).contains("FLAG_1_OFF");
-    assertThat(compileArgs1).contains("FLAG_2_ON");
-    assertThat(compileArgs2).contains("FLAG_1_OFF");
-    assertThat(compileArgs2).contains("FLAG_2_ON");
-  }
-
-  @Test
-  public void testFeatureFlags_allFlagsOn() throws Exception {
-    useConfiguration("--enforce_transitive_configs_for_config_feature_flag");
-    scratchFeatureFlagTestLib();
-    scratch.file(
-        "test/BUILD",
-        "apple_static_library(",
-        "    name = 'static_lib',",
-        "    deps = ['//lib:objcLib'],",
-        "    platform_type = 'ios',",
-        "    feature_flags = {",
-        "      '//lib:flag1': 'on',",
-        "      '//lib:flag2': 'on',",
-        "    },",
-        "    transitive_configs = ['//lib:flag1', '//lib:flag2'],",
-        ")");
-
-    CommandAction linkAction = linkLibAction("//test:static_lib");
-    CommandAction objcLibArchiveAction = (CommandAction) getGeneratingAction(
-        getFirstArtifactEndingWith(linkAction.getInputs(), "libobjcLib.a"));
-
-    CommandAction flag1onCompileAction = (CommandAction) getGeneratingAction(
-        getFirstArtifactEndingWith(objcLibArchiveAction.getInputs(), "flag1on.o"));
-    CommandAction flag2onCompileAction = (CommandAction) getGeneratingAction(
-        getFirstArtifactEndingWith(objcLibArchiveAction.getInputs(), "flag2on.o"));
-
-    String compileArgs1 = Joiner.on(" ").join(flag1onCompileAction.getArguments());
-    String compileArgs2 = Joiner.on(" ").join(flag2onCompileAction.getArguments());
-    assertThat(compileArgs1).contains("FLAG_1_ON");
-    assertThat(compileArgs1).contains("FLAG_2_ON");
-    assertThat(compileArgs2).contains("FLAG_1_ON");
-    assertThat(compileArgs2).contains("FLAG_2_ON");
   }
 
   @Test
@@ -647,5 +605,23 @@ public class AppleStaticLibraryTest extends ObjcRuleTestCase {
     String validation = ActionsTestUtil.baseNamesOf(getOutputGroup(x, OutputGroupInfo.VALIDATION));
     assertThat(validation).contains("y.h.processed");
     assertThat(validation).contains("z.h.processed");
+  }
+
+  @Test
+  public void testRunfiles() throws Exception {
+    scratch.file(
+        "package/BUILD",
+        "apple_static_library(",
+        "    name = 'test',",
+        "    deps = [':objcLib'],",
+        "    platform_type = 'ios',",
+        ")",
+        "objc_library(name = 'objcLib', srcs = [ 'b.m' ])");
+    useConfiguration("--xcode_version=5.8");
+
+    ConfiguredTarget target = getConfiguredTarget("//package:test");
+    assertThat(
+            artifactsToStrings(target.get(DefaultInfo.PROVIDER).getDataRunfiles().getArtifacts()))
+        .contains("/ package/test_lipo.a");
   }
 }

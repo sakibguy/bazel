@@ -966,6 +966,11 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
     return tracksStateForIncrementality();
   }
 
+  @ForOverride
+  protected boolean shouldDeleteActionNodesWhenDroppingAnalysis() {
+    return true;
+  }
+
   /**
    * If not null, this is the only source root in the build, corresponding to the single element in
    * a single-element package path. Such a single-source-root build need not plant the execroot
@@ -1119,8 +1124,12 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
   protected final void deleteAnalysisNodes() {
     memoizingEvaluator.delete(
         keepBuildConfigurationNodesWhenDiscardingAnalysis
-            ? SkyframeExecutor::basicAnalysisInvalidatingPredicate
-            : SkyframeExecutor::fullAnalysisInvalidatingPredicate);
+            ? shouldDeleteActionNodesWhenDroppingAnalysis()
+                ? SkyframeExecutor::basicAnalysisInvalidatingPredicateWithActions
+                : SkyframeExecutor::basicAnalysisInvalidatingPredicate
+            : shouldDeleteActionNodesWhenDroppingAnalysis()
+                ? SkyframeExecutor::fullAnalysisInvalidatingPredicateWithActions
+                : SkyframeExecutor::fullAnalysisInvalidatingPredicate);
   }
 
   // We delete any value that can hold an action -- all subclasses of ActionLookupKey.
@@ -1129,10 +1138,19 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
     return key instanceof ArtifactNestedSetKey || key instanceof ActionLookupKey;
   }
 
+  // Also remove ActionLookupData since all such nodes depend on ActionLookupKey nodes and deleting
+  // en masse is cheaper than deleting via graph traversal (b/192863968).
+  private static boolean basicAnalysisInvalidatingPredicateWithActions(SkyKey key) {
+    return basicAnalysisInvalidatingPredicate(key) || key instanceof ActionLookupData;
+  }
+
   // We may also want to remove BuildConfigurationValue.Keys to fix a minor memory leak there.
   private static boolean fullAnalysisInvalidatingPredicate(SkyKey key) {
-    return key instanceof ArtifactNestedSetKey
-        || key instanceof ActionLookupKey
+    return basicAnalysisInvalidatingPredicate(key) || key instanceof BuildConfigurationValue.Key;
+  }
+
+  private static boolean fullAnalysisInvalidatingPredicateWithActions(SkyKey key) {
+    return basicAnalysisInvalidatingPredicateWithActions(key)
         || key instanceof BuildConfigurationValue.Key;
   }
 
@@ -1294,22 +1312,31 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
 
   protected Differencer.Diff getDiff(
       TimestampGranularityMonitor tsgm,
-      Collection<PathFragment> modifiedSourceFiles,
+      ModifiedFileSet modifiedFileSet,
       final Root pathEntry,
       int fsvcThreads)
-      throws InterruptedException {
-    if (modifiedSourceFiles.isEmpty()) {
+      throws InterruptedException, AbruptExitException {
+    if (modifiedFileSet.modifiedSourceFiles().isEmpty()) {
       return new ImmutableDiff(ImmutableList.of(), ImmutableMap.of());
     }
+
     // TODO(bazel-team): change ModifiedFileSet to work with RootedPaths instead of PathFragments.
     Collection<SkyKey> dirtyFileStateSkyKeys =
         Collections2.transform(
-            modifiedSourceFiles,
+            modifiedFileSet.modifiedSourceFiles(),
             pathFragment -> {
               Preconditions.checkState(
                   !pathFragment.isAbsolute(), "found absolute PathFragment: %s", pathFragment);
               return FileStateValue.key(RootedPath.toRootedPath(pathEntry, pathFragment));
             });
+
+    Map<SkyKey, SkyValue> valuesMap = memoizingEvaluator.getValues();
+
+    if (!modifiedFileSet.includesAncestorDirectories()) {
+      return FileSystemValueCheckerInferringAncestors.getDiffWithInferredAncestors(
+          tsgm, valuesMap, memoizingEvaluator.getDoneValues(), dirtyFileStateSkyKeys, fsvcThreads);
+    }
+
     // We only need to invalidate directory values when a file has been created or deleted or
     // changes type, not when it has merely been modified. Unfortunately we do not have that
     // information here, so we compute it ourselves.
@@ -1320,7 +1347,6 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
             + "changed");
     FilesystemValueChecker fsvc =
         new FilesystemValueChecker(tsgm, /* lastExecutionTimeRange= */ null, fsvcThreads);
-    Map<SkyKey, SkyValue> valuesMap = memoizingEvaluator.getValues();
     Differencer.DiffWithDelta diff =
         fsvc.getNewAndOldValues(valuesMap, dirtyFileStateSkyKeys, new FileDirtinessChecker());
 
@@ -1331,8 +1357,8 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
       Preconditions.checkState(key.functionName().equals(FileStateValue.FILE_STATE), key);
       RootedPath rootedPath = (RootedPath) key.argument();
       Delta delta = entry.getValue();
-      @Nullable FileStateValue oldValue = (FileStateValue) delta.getOldValue();
-      FileStateValue newValue = (FileStateValue) delta.getNewValue();
+      @Nullable FileStateValue oldValue = (FileStateValue) delta.oldValue();
+      FileStateValue newValue = (FileStateValue) delta.newValue();
       valuesToInject.put(key, newValue);
       SkyKey dirListingStateKey = parentDirectoryListingStateKey(rootedPath);
       // Invalidate the directory listing for the path's parent directory if the change was
@@ -2305,7 +2331,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
   @VisibleForTesting
   public final void invalidateFilesUnderPathForTesting(
       ExtendedEventHandler eventHandler, ModifiedFileSet modifiedFileSet, Root pathEntry)
-      throws InterruptedException {
+      throws InterruptedException, AbruptExitException {
     if (lastAnalysisDiscarded) {
       // Values were cleared last build, but they couldn't be deleted because they were needed for
       // the execution phase. We can delete them now.
@@ -2322,7 +2348,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
 
   protected abstract void invalidateFilesUnderPathForTestingImpl(
       ExtendedEventHandler eventHandler, ModifiedFileSet modifiedFileSet, Root pathEntry)
-      throws InterruptedException;
+      throws InterruptedException, AbruptExitException;
 
   /** Invalidates SkyFrame values that may have failed for transient reasons. */
   public abstract void invalidateTransientErrors();

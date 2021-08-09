@@ -28,10 +28,14 @@ import com.google.devtools.build.lib.packages.AspectsListBuilder;
 import com.google.devtools.build.lib.packages.NativeAspectClass;
 import com.google.devtools.build.lib.packages.StarlarkAspect;
 import com.google.devtools.build.lib.packages.StarlarkAspectClass;
+import com.google.devtools.build.lib.server.FailureDetails.Analysis;
+import com.google.devtools.build.lib.server.FailureDetails.Analysis.Code;
+import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.skyframe.AspectValueKey.AspectKey;
 import com.google.devtools.build.lib.skyframe.LoadStarlarkAspectFunction.StarlarkAspectLoadingKey;
 import com.google.devtools.build.lib.skyframe.LoadStarlarkAspectFunction.StarlarkAspectLoadingValue;
 import com.google.devtools.build.lib.skyframe.serialization.autocodec.AutoCodec;
+import com.google.devtools.build.lib.util.DetailedExitCode;
 import com.google.devtools.build.skyframe.SkyFunction;
 import com.google.devtools.build.skyframe.SkyFunctionException;
 import com.google.devtools.build.skyframe.SkyFunctionName;
@@ -82,14 +86,7 @@ public class BuildTopLevelAspectsDetailsFunction implements SkyFunction {
       // aspects and their existence should have been caught and reported by `getTopLevelAspects()`.
       env.getListener().handle(Event.error(e.getMessage()));
       throw new BuildTopLevelAspectsDetailsFunctionException(
-          new AspectCreationException(
-              e.getMessage(),
-              /** currentTarget= */
-              null,
-              /** configuration= */
-              null,
-              /** detailedExitCode= */
-              null));
+          new TopLevelAspectsDetailsBuildFailedException(e.getMessage()));
     }
     return new BuildTopLevelAspectsDetailsValue(getTopLevelAspectsDetails(aspectCollection));
   }
@@ -142,14 +139,18 @@ public class BuildTopLevelAspectsDetailsFunction implements SkyFunction {
         } catch (EvalException e) {
           env.getListener().handle(Event.error(e.getMessage()));
           throw new BuildTopLevelAspectsDetailsFunctionException(
-              new AspectCreationException(
-                  e.getMessage(), ((StarlarkAspectClass) aspectClass).getExtensionLabel()));
+              new TopLevelAspectsDetailsBuildFailedException(e.getMessage()));
         }
       } else {
-        aspectsList.addAspect((NativeAspectClass) aspectClass);
+        try {
+          aspectsList.addAspect((NativeAspectClass) aspectClass);
+        } catch (AssertionError ex) {
+          env.getListener().handle(Event.error(ex.getMessage()));
+          throw new BuildTopLevelAspectsDetailsFunctionException(
+              new TopLevelAspectsDetailsBuildFailedException(ex.getMessage()));
+        }
       }
     }
-
     return aspectsList.buildAspects();
   }
 
@@ -186,8 +187,29 @@ public class BuildTopLevelAspectsDetailsFunction implements SkyFunction {
 
   /** Exceptions thrown from BuildTopLevelAspectsDetailsFunction. */
   public static class BuildTopLevelAspectsDetailsFunctionException extends SkyFunctionException {
-    public BuildTopLevelAspectsDetailsFunctionException(AspectCreationException cause) {
+    public BuildTopLevelAspectsDetailsFunctionException(
+        TopLevelAspectsDetailsBuildFailedException cause) {
       super(cause, Transience.PERSISTENT);
+    }
+  }
+
+  static final class TopLevelAspectsDetailsBuildFailedException extends Exception
+      implements SaneAnalysisException {
+    private final DetailedExitCode detailedExitCode;
+
+    private TopLevelAspectsDetailsBuildFailedException(String errorMessage) {
+      super(errorMessage);
+      this.detailedExitCode =
+          DetailedExitCode.of(
+              FailureDetail.newBuilder()
+                  .setMessage(errorMessage)
+                  .setAnalysis(Analysis.newBuilder().setCode(Code.ASPECT_CREATION_FAILED))
+                  .build());
+    }
+
+    @Override
+    public DetailedExitCode getDetailedExitCode() {
+      return detailedExitCode;
     }
   }
 

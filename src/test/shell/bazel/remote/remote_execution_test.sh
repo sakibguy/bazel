@@ -1157,6 +1157,52 @@ EOF
   || fail "Expected bazel-bin/a/template.txt to be downloaded"
 }
 
+function test_downloads_minimal_hit_action_cache() {
+  # Test that remote metadata is saved and action cache is hit across server restarts when using
+  # --remote_download_minimal
+  mkdir -p a
+  cat > a/BUILD <<'EOF'
+genrule(
+  name = "foo",
+  srcs = [],
+  outs = ["foo.txt"],
+  cmd = "echo \"foo\" > \"$@\"",
+)
+
+genrule(
+  name = "foobar",
+  srcs = [":foo"],
+  outs = ["foobar.txt"],
+  cmd = "cat $(location :foo) > \"$@\" && echo \"bar\" >> \"$@\"",
+)
+EOF
+
+  bazel build \
+    --experimental_ui_debug_all_events \
+    --experimental_action_cache_store_output_metadata \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --remote_download_minimal \
+    //a:foobar >& $TEST_log || fail "Failed to build //a:foobar"
+
+  expect_log "START.*: \[.*\] Executing genrule //a:foobar"
+
+  (! [[ -e bazel-bin/a/foo.txt ]] && ! [[ -e bazel-bin/a/foobar.txt ]]) \
+  || fail "Expected no files to have been downloaded"
+
+  assert_equals "" "$(ls bazel-bin/a)"
+
+  bazel shutdown
+
+  bazel build \
+    --experimental_ui_debug_all_events \
+    --experimental_action_cache_store_output_metadata \
+    --remote_executor=grpc://localhost:${worker_port} \
+    --remote_download_minimal \
+    //a:foobar >& $TEST_log || fail "Failed to build //a:foobar"
+
+  expect_not_log "START.*: \[.*\] Executing genrule //a:foobar"
+}
+
 function test_downloads_toplevel() {
   # Test that when using --remote_download_outputs=toplevel only the output of the
   # toplevel target is being downloaded.
@@ -1768,6 +1814,64 @@ EOF
         || fail "should have worked"
 }
 
+function test_tag_no_cache() {
+  mkdir -p a
+  cat > a/BUILD <<'EOF'
+genrule(
+  name = "foo",
+  srcs = [],
+  outs = ["foo.txt"],
+  cmd = "echo \"foo\" > \"$@\"",
+  tags = ["no-cache"]
+)
+EOF
+
+  bazel build \
+    --remote_executor=grpc://localhost:${worker_port} \
+    //a:foo >& $TEST_log || "Failed to build //a:foo"
+
+  expect_log "1 remote"
+
+  bazel clean
+
+  bazel build \
+    --remote_executor=grpc://localhost:${worker_port} \
+    //a:foo >& $TEST_log || "Failed to build //a:foo"
+
+  expect_log "1 remote"
+  expect_not_log "remote cache hit"
+}
+
+function test_tag_no_cache_for_disk_cache() {
+  mkdir -p a
+  cat > a/BUILD <<'EOF'
+genrule(
+  name = "foo",
+  srcs = [],
+  outs = ["foo.txt"],
+  cmd = "echo \"foo\" > \"$@\"",
+  tags = ["no-cache"]
+)
+EOF
+
+  CACHEDIR=$(mktemp -d)
+
+  bazel build \
+    --disk_cache=$CACHEDIR \
+    //a:foo >& $TEST_log || "Failed to build //a:foo"
+
+  expect_log "1 .*-sandbox"
+
+  bazel clean
+
+  bazel build \
+    --disk_cache=$CACHEDIR \
+    //a:foo >& $TEST_log || "Failed to build //a:foo"
+
+  expect_log "1 .*-sandbox"
+  expect_not_log "remote cache hit"
+}
+
 function test_tag_no_remote_cache() {
   mkdir -p a
   cat > a/BUILD <<'EOF'
@@ -1790,10 +1894,39 @@ EOF
 
   bazel build \
     --remote_executor=grpc://localhost:${worker_port} \
-    //a:foo || "Failed to build //a:foo"
+    //a:foo >& $TEST_log || "Failed to build //a:foo"
 
   expect_log "1 remote"
   expect_not_log "remote cache hit"
+}
+
+function test_tag_no_remote_cache_for_disk_cache() {
+  mkdir -p a
+  cat > a/BUILD <<'EOF'
+genrule(
+  name = "foo",
+  srcs = [],
+  outs = ["foo.txt"],
+  cmd = "echo \"foo\" > \"$@\"",
+  tags = ["no-remote-cache"]
+)
+EOF
+
+  CACHEDIR=$(mktemp -d)
+
+  bazel build \
+    --disk_cache=$CACHEDIR \
+    //a:foo >& $TEST_log || "Failed to build //a:foo"
+
+  expect_log "1 .*-sandbox"
+
+  bazel clean
+
+  bazel build \
+    --disk_cache=$CACHEDIR \
+    //a:foo >& $TEST_log || "Failed to build //a:foo"
+
+  expect_log "1 remote cache hit"
 }
 
 function test_tag_no_remote_exec() {
@@ -2048,6 +2181,51 @@ EOF
     || fail "Disk cache generated different result"
 
   rm -rf $cache
+}
+
+function test_combined_cache_with_no_remote_cache_tag() {
+  # Test that actions with no-remote-cache tag can hit disk cache of a combined cache but
+  # remote cache is disabled.
+
+  local cache="${TEST_TMPDIR}/cache"
+  local disk_flags="--disk_cache=$cache"
+  local grpc_flags="--remote_cache=grpc://localhost:${worker_port}"
+
+  mkdir -p a
+  cat > a/BUILD <<EOF
+package(default_visibility = ["//visibility:public"])
+genrule(
+name = 'test',
+cmd = 'echo "Hello world" > \$@',
+outs = [ 'test.txt' ],
+tags = ['no-remote-cache'],
+)
+EOF
+
+  rm -rf $cache
+  mkdir $cache
+
+  # Build and push to disk cache but not remote cache
+  bazel build $disk_flags $grpc_flags --incompatible_remote_results_ignore_disk=true //a:test \
+    || fail "Failed to build //a:test with combined cache"
+  cp -f bazel-genfiles/a/test.txt ${TEST_TMPDIR}/test_expected
+
+  # Fetch from disk cache
+  bazel clean
+  bazel build $disk_flags //a:test --incompatible_remote_results_ignore_disk=true &> $TEST_log \
+    || fail "Failed to fetch //a:test from disk cache"
+  expect_log "1 remote cache hit" "Fetch from disk cache failed"
+  diff bazel-genfiles/a/test.txt ${TEST_TMPDIR}/test_expected \
+    || fail "Disk cache generated different result"
+
+  # No cache result from grpc cache, rebuild target
+  bazel clean
+  bazel build $grpc_flags //a:test --incompatible_remote_results_ignore_disk=true &> $TEST_log \
+    || fail "Failed to build //a:test"
+  expect_not_log "1 remote cache hit" "Should not get cache hit from grpc cache"
+  expect_log "1 .*-sandbox" "Rebuild target failed"
+  diff bazel-genfiles/a/test.txt ${TEST_TMPDIR}/test_expected \
+    || fail "Rebuilt target generated different result"
 }
 
 function test_repo_remote_exec() {
@@ -2697,3 +2875,5 @@ EOF
 }
 
 run_suite "Remote execution and remote cache tests"
+
+}

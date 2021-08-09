@@ -463,7 +463,7 @@ public class EagerInvalidatorTest {
     SkyKey[] values = constructLargeGraph(graphSize);
     eval(/*keepGoing=*/false, values);
     final Thread mainThread = Thread.currentThread();
-    for (int run = 0; run < tries; run++) {
+    for (int run = 0; run < tries + 1; run++) {
       Set<Pair<SkyKey, InvalidationType>> valuesToInvalidate = getValuesToInvalidate(values);
       // Find how many invalidations will actually be enqueued for invalidation in the first round,
       // so that we can interrupt before all of them are done.
@@ -475,25 +475,28 @@ public class EagerInvalidatorTest {
         }
       }
       int countDownStart = validValuesToDo > 0 ? random.nextInt(validValuesToDo) : 0;
-      final CountDownLatch countDownToInterrupt = new CountDownLatch(countDownStart);
-      final DirtyTrackingProgressReceiver receiver =
-          new DirtyTrackingProgressReceiver(
-              new EvaluationProgressReceiver() {
-                @Override
-                public void invalidated(SkyKey skyKey, InvalidationState state) {
-                  countDownToInterrupt.countDown();
-                  if (countDownToInterrupt.getCount() == 0) {
-                    mainThread.interrupt();
-                    // Wait for the main thread to be interrupted uninterruptibly, because the main
-                    // thread is going to interrupt us, and we don't want to get into an interrupt
-                    // fight. Only if we get interrupted without the main thread also being
-                    // interrupted will this throw an InterruptedException.
-                    TrackingAwaiter.INSTANCE.awaitLatchAndTrackExceptions(
-                        visitor.get().getInterruptionLatchForTestingOnly(),
-                        "Main thread was not interrupted");
-                  }
-                }
-              });
+      CountDownLatch countDownToInterrupt = new CountDownLatch(countDownStart);
+      // Make sure final invalidation finishes.
+      DirtyTrackingProgressReceiver receiver =
+          run == tries
+              ? new DirtyTrackingProgressReceiver(null)
+              : new DirtyTrackingProgressReceiver(
+                  new EvaluationProgressReceiver() {
+                    @Override
+                    public void invalidated(SkyKey skyKey, InvalidationState state) {
+                      countDownToInterrupt.countDown();
+                      if (countDownToInterrupt.getCount() == 0) {
+                        mainThread.interrupt();
+                        // Wait for the main thread to be interrupted uninterruptibly, because the
+                        // main thread is going to interrupt us, and we don't want to get into an
+                        // interrupt fight. Only if we get interrupted without the main thread also
+                        // being interrupted will this throw an InterruptedException.
+                        TrackingAwaiter.INSTANCE.awaitLatchAndTrackExceptions(
+                            visitor.get().getInterruptionLatchForTestingOnly(),
+                            "Main thread was not interrupted");
+                      }
+                    }
+                  });
       try {
         invalidate(
             graph,
@@ -502,7 +505,7 @@ public class EagerInvalidatorTest {
                 .toArray(new SkyKey[0]));
         assertThat(state.getInvalidationsForTesting()).isEmpty();
       } catch (InterruptedException e) {
-        // Expected.
+        assertThat(run).isLessThan(tries);
       }
       if (state.isEmpty()) {
         // Ran out of values to invalidate.
@@ -538,7 +541,11 @@ public class EagerInvalidatorTest {
       Iterable<SkyKey> diff = ImmutableList.copyOf(keys);
       DeletingNodeVisitor deletingNodeVisitor =
           EagerInvalidator.createDeletingVisitorIfNeeded(
-              graph, diff, new DirtyTrackingProgressReceiver(progressReceiver), state, true);
+              graph,
+              diff,
+              new DirtyTrackingProgressReceiver(progressReceiver),
+              (InvalidatingNodeVisitor.DeletingInvalidationState) state,
+              true);
       if (deletingNodeVisitor != null) {
         visitor.set(deletingNodeVisitor);
         deletingNodeVisitor.run();
@@ -556,7 +563,7 @@ public class EagerInvalidatorTest {
     }
 
     @Override
-    protected InvalidatingNodeVisitor.InvalidationState newInvalidationState() {
+    protected InvalidatingNodeVisitor.DeletingInvalidationState newInvalidationState() {
       return new InvalidatingNodeVisitor.DeletingInvalidationState();
     }
 
@@ -585,8 +592,14 @@ public class EagerInvalidatorTest {
       assertThat(receiver.getUnenqueuedDirtyKeys()).containsExactly(diff.get(0), skyKey("ab"));
 
       // Delete the node, and ensure that the tracker is no longer tracking it:
-      Preconditions.checkNotNull(EagerInvalidator.createDeletingVisitorIfNeeded(graph, diff,
-          receiver, state, true)).run();
+      Preconditions.checkNotNull(
+              EagerInvalidator.createDeletingVisitorIfNeeded(
+                  graph,
+                  diff,
+                  receiver,
+                  (InvalidatingNodeVisitor.DeletingInvalidationState) state,
+                  true))
+          .run();
       assertThat(receiver.getUnenqueuedDirtyKeys()).isEmpty();
     }
   }

@@ -95,12 +95,10 @@ public final class RuleConfiguredTargetBuilder {
   private ImmutableSet<ActionAnalysisMetadata> actionsWithoutExtraAction = ImmutableSet.of();
   private final LinkedHashSet<String> ruleImplSpecificRequiredConfigFragments =
       new LinkedHashSet<>();
-  private boolean propagateValidationActionOutputGroup = true;
 
   public RuleConfiguredTargetBuilder(RuleContext ruleContext) {
     this.ruleContext = ruleContext;
     // Avoid building validations in analysis tests (b/143988346)
-    propagateValidationActionOutputGroup = !ruleContext.getRule().isAnalysisTest();
     add(LicensesProvider.class, LicensesProviderImpl.of(ruleContext));
     add(VisibilityProvider.class, new VisibilityProviderImpl(ruleContext.getVisibility()));
   }
@@ -161,7 +159,7 @@ public final class RuleConfiguredTargetBuilder {
               .getAllArtifacts());
     }
 
-    if (propagateValidationActionOutputGroup) {
+    if (propagateValidationActionOutputGroup()) {
       propagateTransitiveValidationOutputGroups();
     }
 
@@ -278,6 +276,10 @@ public final class RuleConfiguredTargetBuilder {
         generatingActions.getArtifactsByOutputLabel());
   }
 
+  private boolean propagateValidationActionOutputGroup() {
+    return !ruleContext.getRule().isAnalysisTest();
+  }
+
   /** Actually process */
   private void handleAllowlistChecker(AllowlistChecker allowlistChecker) {
     if (allowlistChecker.attributeSetTrigger() != null
@@ -357,10 +359,23 @@ public final class RuleConfiguredTargetBuilder {
    * validation action output group itself.
    */
   private void propagateTransitiveValidationOutputGroups() {
-    collectTransitiveValidationOutputGroups(
-        ruleContext,
-        unused -> true,
-        validationArtifacts -> addOutputGroup(OutputGroupInfo.VALIDATION, validationArtifacts));
+    if (outputGroupBuilders.containsKey(OutputGroupInfo.VALIDATION_TRANSITIVE)) {
+      Label rdeLabel =
+          ruleContext.getRule().getRuleClassObject().getRuleDefinitionEnvironmentLabel();
+      // only allow native and builtins to override transitive validation propagation
+      if (rdeLabel != null && !"@_builtins".equals(rdeLabel.getRepository().getName())) {
+        ruleContext.ruleError(rdeLabel + " cannot access the _transitive_validation private API");
+        return;
+      }
+      addOutputGroup(
+          OutputGroupInfo.VALIDATION,
+          outputGroupBuilders.remove(OutputGroupInfo.VALIDATION_TRANSITIVE).build());
+    } else {
+      collectTransitiveValidationOutputGroups(
+          ruleContext,
+          unused -> true,
+          validationArtifacts -> addOutputGroup(OutputGroupInfo.VALIDATION, validationArtifacts));
+    }
   }
 
   /**
@@ -636,12 +651,6 @@ public final class RuleConfiguredTargetBuilder {
    */
   public RuleConfiguredTargetBuilder setFilesToBuild(NestedSet<Artifact> filesToBuild) {
     this.filesToBuild = filesToBuild;
-    return this;
-  }
-
-  /** Sets whether to propagate the validation actions output group. This is true by default. */
-  public RuleConfiguredTargetBuilder setPropagateValidationActionOutputGroup(boolean propagate) {
-    this.propagateValidationActionOutputGroup = propagate;
     return this;
   }
 
