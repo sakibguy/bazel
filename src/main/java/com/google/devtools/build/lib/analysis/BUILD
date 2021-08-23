@@ -306,6 +306,7 @@ java_library(
         ":config/transitions/null_transition",
         ":config/transitions/patch_transition",
         ":config/transitions/split_transition",
+        ":config/transitions/starlark_exposed_rule_transition_factory",
         ":config/transitions/transition_factory",
         ":configurations_collector",
         ":configured_target",
@@ -979,8 +980,13 @@ java_library(
     srcs = ["RequiredConfigFragmentsProvider.java"],
     deps = [
         ":config/fragment",
+        ":config/fragment_class_set",
+        ":config/fragment_options",
         ":transitive_info_provider",
+        "//src/main/java/com/google/devtools/build/lib/cmdline",
         "//src/main/java/com/google/devtools/build/lib/concurrent",
+        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/autocodec:serialization-constant",
+        "//src/main/java/com/google/devtools/build/lib/util",
         "//third_party:guava",
     ],
 )
@@ -1522,6 +1528,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/autocodec:serialization-constant",
         "//src/main/java/com/google/devtools/build/lib/util",
         "//third_party:guava",
+        "//third_party:jsr305",
     ],
 )
 
@@ -1623,7 +1630,8 @@ java_library(
     name = "config/config_matching_provider",
     srcs = ["config/ConfigMatchingProvider.java"],
     deps = [
-        "//src/main/java/com/google/devtools/build/lib/analysis:transitive_info_provider",
+        ":required_config_fragments_provider",
+        ":transitive_info_provider",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
         "//src/main/java/com/google/devtools/build/lib/concurrent",
         "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/autocodec",
@@ -1858,8 +1866,8 @@ java_library(
         ":config/transitions/configuration_transition",
         ":config/transitions/no_transition",
         ":config/transitions/null_transition",
+        ":required_config_fragments_provider",
         "//src/main/java/com/google/devtools/build/lib/events",
-        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/autocodec",
         "//third_party:guava",
     ],
 )
@@ -1887,8 +1895,8 @@ java_library(
     deps = [
         ":config/build_options",
         ":config/fragment_options",
+        ":required_config_fragments_provider",
         "//src/main/java/com/google/devtools/build/lib/events",
-        "//src/main/java/com/google/devtools/build/lib/util",
         "//third_party:guava",
     ],
 )
@@ -1947,6 +1955,19 @@ java_library(
     name = "config/transitions/transition_factory",
     srcs = ["config/transitions/TransitionFactory.java"],
     deps = [":config/transitions/configuration_transition"],
+)
+
+java_library(
+    name = "config/transitions/starlark_exposed_rule_transition_factory",
+    srcs = ["config/transitions/StarlarkExposedRuleTransitionFactory.java"],
+    deps = [
+        ":config/transitions/transition_factory",
+        ":rule_definition_environment",
+        "//src/main/java/com/google/devtools/build/docgen/annot",
+        "//src/main/java/com/google/devtools/build/lib/packages",
+        "//src/main/java/net/starlark/java/annot",
+        "//src/main/java/net/starlark/java/eval",
+    ],
 )
 
 # TODO(b/144899336): This should be analysis/constraints/BUILD
