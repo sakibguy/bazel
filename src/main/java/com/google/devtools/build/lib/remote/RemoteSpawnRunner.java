@@ -54,6 +54,7 @@ import com.google.devtools.build.lib.profiler.SilentCloseable;
 import com.google.devtools.build.lib.remote.RemoteExecutionService.RemoteAction;
 import com.google.devtools.build.lib.remote.RemoteExecutionService.RemoteActionResult;
 import com.google.devtools.build.lib.remote.RemoteExecutionService.ServerLogs;
+import com.google.devtools.build.lib.remote.common.BulkTransferException;
 import com.google.devtools.build.lib.remote.common.OperationObserver;
 import com.google.devtools.build.lib.remote.options.RemoteOptions;
 import com.google.devtools.build.lib.remote.util.Utils;
@@ -121,6 +122,11 @@ public class RemoteSpawnRunner implements SpawnRunner {
     this.retrier = createExecuteRetrier(remoteOptions, retryService);
     this.logDir = logDir;
     this.remoteExecutionService = remoteExecutionService;
+  }
+
+  @VisibleForTesting
+  RemoteExecutionService getRemoteExecutionService() {
+    return remoteExecutionService;
   }
 
   @Override
@@ -228,6 +234,7 @@ public class RemoteSpawnRunner implements SpawnRunner {
     }
 
     AtomicBoolean useCachedResult = new AtomicBoolean(acceptCachedResult);
+    AtomicBoolean forceUploadInput = new AtomicBoolean(false);
     try {
       return retrier.execute(
           () -> {
@@ -235,7 +242,10 @@ public class RemoteSpawnRunner implements SpawnRunner {
             try (SilentCloseable c = prof.profile(UPLOAD_TIME, "upload missing inputs")) {
               Duration networkTimeStart = action.getNetworkTime().getDuration();
               Stopwatch uploadTime = Stopwatch.createStarted();
-              remoteExecutionService.uploadInputsIfNotPresent(action);
+              // Upon retry, we force upload inputs
+              remoteExecutionService.uploadInputsIfNotPresent(
+                  action, forceUploadInput.getAndSet(true));
+
               // subtract network time consumed here to ensure wall clock during upload is not
               // double
               // counted, and metrics time computation does not exceed total time
@@ -566,13 +576,7 @@ public class RemoteSpawnRunner implements SpawnRunner {
     }
 
     try (SilentCloseable c = Profiler.instance().profile(UPLOAD_TIME, "upload outputs")) {
-      remoteExecutionService.uploadOutputs(action);
-    } catch (IOException e) {
-      if (verboseFailures) {
-        report(Event.debug("Upload to remote cache failed: " + e.getMessage()));
-      } else {
-        reportOnce(Event.warn("Some artifacts failed be uploaded to the remote cache."));
-      }
+      remoteExecutionService.uploadOutputs(action, result);
     }
     return result;
   }

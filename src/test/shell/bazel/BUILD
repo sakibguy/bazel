@@ -479,6 +479,7 @@ sh_test(
         "//src/test/shell/bazel/testdata:jdk_http_archives_filegroup",
     ],
     tags = [
+        "manual",
         "no_windows",
     ],
 )
@@ -502,6 +503,7 @@ sh_test(
             "//src/test/shell/bazel/testdata:jdk_http_archives_filegroup",
         ],
         tags = [
+            "manual",
             "no_windows",
         ],
     )
@@ -949,6 +951,20 @@ sh_test(
         "no-sandbox",
         "no_windows",
         "requires-network",
+    ],
+)
+
+sh_test(
+    name = "bazel_hermetic_sandboxing_test",
+    size = "small",
+    srcs = ["bazel_hermetic_sandboxing_test.sh"],
+    data = [
+        ":test-deps",
+        "//src/test/shell:sandboxing_test_utils.sh",
+    ],
+    tags = [
+        "no-sandbox",
+        "no_windows",
     ],
 )
 

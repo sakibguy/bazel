@@ -98,6 +98,16 @@ public final class RemoteOptions extends OptionsBase {
   public PathFragment remoteCaptureCorruptedOutputs;
 
   @Option(
+      name = "experimental_remote_cache_async",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.REMOTE,
+      effectTags = {OptionEffectTag.UNKNOWN},
+      help =
+          "If true, remote cache I/O will happen in the background instead of taking place as the"
+              + " part of a spawn.")
+  public boolean remoteCacheAsync;
+
+  @Option(
       name = "remote_cache",
       oldName = "remote_http_cache",
       defaultValue = "null",
@@ -261,10 +271,7 @@ public final class RemoteOptions extends OptionsBase {
       category = "remote",
       documentationCategory = OptionDocumentationCategory.REMOTE,
       effectTags = {OptionEffectTag.UNKNOWN},
-      metadataTags = {
-        OptionMetadataTag.INCOMPATIBLE_CHANGE,
-        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
-      },
+      metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
       help =
           "If set to true, --noremote_upload_local_results and --noremote_accept_cached will not"
               + " apply to the disk cache. If a combined cache is used:\n"
@@ -281,10 +288,7 @@ public final class RemoteOptions extends OptionsBase {
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.REMOTE,
       effectTags = {OptionEffectTag.UNKNOWN},
-      metadataTags = {
-        OptionMetadataTag.INCOMPATIBLE_CHANGE,
-        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
-      },
+      metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
       help =
           "If set to true, output paths are relative to input root instead of working directory.")
   public boolean incompatibleRemoteOutputPathsRelativeToInputRoot;
@@ -352,10 +356,7 @@ public final class RemoteOptions extends OptionsBase {
       category = "remote",
       documentationCategory = OptionDocumentationCategory.EXECUTION_STRATEGY,
       effectTags = {OptionEffectTag.EXECUTION},
-      metadataTags = {
-        OptionMetadataTag.INCOMPATIBLE_CHANGE,
-        OptionMetadataTag.TRIGGERED_BY_ALL_INCOMPATIBLE_CHANGES
-      },
+      metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
       help =
           "If set to true, Bazel will represent symlinks in action outputs "
               + "in the remote caching/execution protocol as such. The "

@@ -35,6 +35,7 @@ import com.google.devtools.build.lib.repository.ExternalPackageException;
 import com.google.devtools.build.lib.repository.ExternalPackageHelper;
 import com.google.devtools.build.lib.repository.ExternalRuleNotFoundException;
 import com.google.devtools.build.lib.repository.RepositoryFailedEvent;
+import com.google.devtools.build.lib.rules.repository.RepositoryDirectoryValue.NoRepositoryDirectoryValue;
 import com.google.devtools.build.lib.rules.repository.RepositoryFunction.AlreadyReportedRepositoryAccessException;
 import com.google.devtools.build.lib.rules.repository.RepositoryFunction.RepositoryFunctionException;
 import com.google.devtools.build.lib.skyframe.ManagedDirectoriesKnowledge;
@@ -236,6 +237,13 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
       throws InterruptedException, RepositoryFunctionException {
     RepositoryName repositoryName = (RepositoryName) skyKey.argument();
 
+    if (!repositoryName.isVisible()) {
+      return new NoRepositoryDirectoryValue(
+          String.format(
+              "Repository '%s' is not visible from repository '@%s'",
+              repositoryName.getCanonicalForm(), repositoryName.getOwnerRepoIfNotVisible()));
+    }
+
     Map<RepositoryName, PathFragment> overrides = REPOSITORY_OVERRIDES.get(env);
     boolean doNotFetchUnconditionally =
         DONT_FETCH_UNCONDITIONALLY.equals(DEPENDENCY_FOR_UNCONDITIONAL_FETCHING.get(env));
@@ -274,14 +282,16 @@ public final class RepositoryDelegatorFunction implements SkyFunction {
           return null;
         }
       } catch (NoSuchRepositoryException e) {
-        return RepositoryDirectoryValue.NO_SUCH_REPOSITORY_VALUE;
+        return new NoRepositoryDirectoryValue(
+            String.format("Repository '%s' is not defined", repositoryName.getCanonicalForm()));
       }
     }
 
     RepositoryFunction handler = getHandler(rule);
     if (handler == null) {
       // If we refer to a non repository rule then the repository does not exist.
-      return RepositoryDirectoryValue.NO_SUCH_REPOSITORY_VALUE;
+      return new NoRepositoryDirectoryValue(
+          String.format("'%s' is not a repository rule", repositoryName.getCanonicalForm()));
     }
 
     if (handler.isConfigure(rule)) {

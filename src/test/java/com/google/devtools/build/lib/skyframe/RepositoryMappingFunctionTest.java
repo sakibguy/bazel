@@ -26,6 +26,7 @@ import com.google.devtools.build.lib.analysis.util.BuildViewTestCase;
 import com.google.devtools.build.lib.bazel.bzlmod.FakeRegistry;
 import com.google.devtools.build.lib.bazel.bzlmod.ModuleFileFunction;
 import com.google.devtools.build.lib.bazel.bzlmod.Version.ParseException;
+import com.google.devtools.build.lib.cmdline.RepositoryMapping;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
 import com.google.devtools.build.lib.packages.NoSuchPackageException;
 import com.google.devtools.build.lib.skyframe.util.SkyframeExecutorTestUtils;
@@ -71,6 +72,18 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
         getSkyframeExecutor().getDifferencerForTesting(), ImmutableList.of(registry.getUrl()));
   }
 
+  public static RepositoryMappingValue withMappingAllowingFallback(
+      ImmutableMap<RepositoryName, RepositoryName> repositoryMapping) {
+    return RepositoryMappingValue.withMapping(
+        RepositoryMapping.createAllowingFallback(repositoryMapping));
+  }
+
+  public static RepositoryMappingValue withMapping(
+      ImmutableMap<RepositoryName, RepositoryName> repositoryMapping, RepositoryName ownerRepo) {
+    return RepositoryMappingValue.withMapping(
+        RepositoryMapping.create(repositoryMapping, ownerRepo.strippedName()));
+  }
+
   @Test
   public void testSimpleMapping() throws Exception {
     scratch.overwriteFile(
@@ -89,7 +102,7 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(result)
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(
                     RepositoryName.create("@a"),
                     RepositoryName.create("@b"),
@@ -113,9 +126,15 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(result)
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMapping(
                 ImmutableMap.of(
-                    RepositoryName.create("@com_foo_bar_b"), RepositoryName.create("@B.1.0"))));
+                    RepositoryName.create("@"),
+                    RepositoryName.create("@"),
+                    RepositoryName.create("@A"),
+                    RepositoryName.create("@"),
+                    RepositoryName.create("@com_foo_bar_b"),
+                    RepositoryName.create("@B.1.0")),
+                name));
   }
 
   @Test
@@ -140,9 +159,13 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(result)
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMapping(
                 ImmutableMap.of(
-                    RepositoryName.create("@com_foo_bar_b"), RepositoryName.create("@B.1.0"))));
+                    RepositoryName.create("@C"),
+                    RepositoryName.create("@C.1.0"),
+                    RepositoryName.create("@com_foo_bar_b"),
+                    RepositoryName.create("@B.1.0")),
+                name));
   }
 
   @Test
@@ -162,8 +185,13 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(result)
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
-                ImmutableMap.of(RepositoryName.create("@A"), RepositoryName.create("@"))));
+            withMapping(
+                ImmutableMap.of(
+                    RepositoryName.create("@B"),
+                    RepositoryName.create("@B.1.0"),
+                    RepositoryName.create("@A"),
+                    RepositoryName.create("@")),
+                name));
   }
 
   @Test
@@ -188,10 +216,17 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(result)
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMapping(
                 ImmutableMap.of(
-                    RepositoryName.create("@B1"), RepositoryName.create("@B.1.0"),
-                    RepositoryName.create("@B2"), RepositoryName.create("@B.2.0"))));
+                    RepositoryName.create("@"),
+                    RepositoryName.create("@"),
+                    RepositoryName.create("@A"),
+                    RepositoryName.create("@"),
+                    RepositoryName.create("@B1"),
+                    RepositoryName.create("@B.1.0"),
+                    RepositoryName.create("@B2"),
+                    RepositoryName.create("@B.2.0")),
+                name));
   }
 
   @Test
@@ -222,9 +257,11 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(result)
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMapping(
                 ImmutableMap.of(
-                    RepositoryName.create("@D"), RepositoryName.create("@D.1.0"))));
+                    RepositoryName.create("@B"), RepositoryName.create("@B.1.0"),
+                    RepositoryName.create("@D"), RepositoryName.create("@D.1.0")),
+                name));
   }
 
   @Test
@@ -253,9 +290,11 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(result)
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMapping(
                 ImmutableMap.of(
-                    RepositoryName.create("@com_foo_bar_c"), RepositoryName.create("@C.1.0"))));
+                    RepositoryName.create("@B"), RepositoryName.create("@B.1.0"),
+                    RepositoryName.create("@com_foo_bar_c"), RepositoryName.create("@C.1.0")),
+                name));
   }
 
   @Test
@@ -281,7 +320,7 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(eval(skyKey1))
         .hasEntryThat(skyKey1)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(
                     RepositoryName.create("@a"),
                     RepositoryName.create("@b"),
@@ -290,7 +329,7 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(eval(skyKey2))
         .hasEntryThat(skyKey2)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(
                     RepositoryName.create("@x"),
                     RepositoryName.create("@y"),
@@ -314,7 +353,7 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(eval(skyKey))
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(
                     RepositoryName.create("@a"),
                     RepositoryName.create("@b"),
@@ -360,7 +399,7 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(eval(skyKey))
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.<RepositoryName, RepositoryName>builder()
                     .put(RepositoryName.create("@root"), RepositoryName.MAIN)
                     // mappings to @B get remapped to @B.1.0 because of module B@1.0
@@ -413,7 +452,7 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(eval(skyKey))
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(
                     RepositoryName.createFromValidStrippedName(TestConstants.WORKSPACE_NAME),
                     RepositoryName.MAIN)));
@@ -434,7 +473,7 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
     assertThatEvaluationResult(eval(skyKey))
         .hasEntryThat(skyKey)
         .isEqualTo(
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(RepositoryName.create("@good"), RepositoryName.MAIN)));
   }
 
@@ -442,14 +481,14 @@ public class RepositoryMappingFunctionTest extends BuildViewTestCase {
   public void testEqualsAndHashCode() throws Exception {
     new EqualsTester()
         .addEqualityGroup(
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(RepositoryName.create("@foo"), RepositoryName.create("@bar"))),
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(RepositoryName.create("@foo"), RepositoryName.create("@bar"))))
         .addEqualityGroup(
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(RepositoryName.create("@fizz"), RepositoryName.create("@buzz"))),
-            RepositoryMappingValue.withMapping(
+            withMappingAllowingFallback(
                 ImmutableMap.of(RepositoryName.create("@fizz"), RepositoryName.create("@buzz"))))
         .testEquals();
   }

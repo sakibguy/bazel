@@ -17,6 +17,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Strings.isNullOrEmpty;
+import static com.google.common.base.Throwables.getStackTraceAsString;
 import static com.google.common.util.concurrent.Futures.immediateFailedFuture;
 import static com.google.common.util.concurrent.Futures.immediateFuture;
 import static com.google.common.util.concurrent.Futures.transform;
@@ -25,6 +26,7 @@ import static com.google.devtools.build.lib.remote.RemoteCache.createFailureDeta
 import static com.google.devtools.build.lib.remote.RemoteCache.waitForBulkTransfer;
 import static com.google.devtools.build.lib.remote.util.Utils.getFromFuture;
 import static com.google.devtools.build.lib.remote.util.Utils.getInMemoryOutputPath;
+import static com.google.devtools.build.lib.remote.util.Utils.grpcAwareErrorMessage;
 import static com.google.devtools.build.lib.remote.util.Utils.hasFilesToDownload;
 import static com.google.devtools.build.lib.remote.util.Utils.shouldAcceptCachedResultFromCombinedCache;
 import static com.google.devtools.build.lib.remote.util.Utils.shouldAcceptCachedResultFromDiskCache;
@@ -52,6 +54,7 @@ import build.bazel.remote.execution.v2.Platform;
 import build.bazel.remote.execution.v2.RequestMetadata;
 import build.bazel.remote.execution.v2.SymlinkNode;
 import build.bazel.remote.execution.v2.Tree;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
@@ -59,8 +62,10 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
+import com.google.common.eventbus.Subscribe;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
+import com.google.devtools.build.lib.actions.ActionExecutionMetadata;
 import com.google.devtools.build.lib.actions.ActionInput;
 import com.google.devtools.build.lib.actions.Artifact;
 import com.google.devtools.build.lib.actions.Artifact.SpecialArtifact;
@@ -70,16 +75,21 @@ import com.google.devtools.build.lib.actions.ExecException;
 import com.google.devtools.build.lib.actions.FileArtifactValue.RemoteFileArtifactValue;
 import com.google.devtools.build.lib.actions.ForbiddenActionInputException;
 import com.google.devtools.build.lib.actions.Spawn;
+import com.google.devtools.build.lib.actions.SpawnResult;
 import com.google.devtools.build.lib.actions.Spawns;
 import com.google.devtools.build.lib.actions.UserExecException;
 import com.google.devtools.build.lib.actions.cache.MetadataInjector;
 import com.google.devtools.build.lib.analysis.platform.PlatformUtils;
+import com.google.devtools.build.lib.buildtool.buildevent.BuildInterruptedEvent;
+import com.google.devtools.build.lib.events.Event;
+import com.google.devtools.build.lib.events.Reporter;
 import com.google.devtools.build.lib.exec.SpawnRunner.SpawnExecutionContext;
 import com.google.devtools.build.lib.profiler.Profiler;
 import com.google.devtools.build.lib.profiler.SilentCloseable;
 import com.google.devtools.build.lib.remote.RemoteExecutionService.ActionResultMetadata.DirectoryMetadata;
 import com.google.devtools.build.lib.remote.RemoteExecutionService.ActionResultMetadata.FileMetadata;
 import com.google.devtools.build.lib.remote.RemoteExecutionService.ActionResultMetadata.SymlinkMetadata;
+import com.google.devtools.build.lib.remote.common.BulkTransferException;
 import com.google.devtools.build.lib.remote.common.NetworkTime;
 import com.google.devtools.build.lib.remote.common.OperationObserver;
 import com.google.devtools.build.lib.remote.common.OutputDigestMismatchException;
@@ -105,6 +115,12 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.ExtensionRegistry;
 import com.google.protobuf.Message;
 import io.grpc.Status.Code;
+import io.reactivex.rxjava3.annotations.NonNull;
+import io.reactivex.rxjava3.core.Scheduler;
+import io.reactivex.rxjava3.core.Single;
+import io.reactivex.rxjava3.core.SingleObserver;
+import io.reactivex.rxjava3.disposables.Disposable;
+import io.reactivex.rxjava3.schedulers.Schedulers;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -117,6 +133,8 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.SortedMap;
 import java.util.TreeSet;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.annotation.Nullable;
 
 /**
@@ -124,6 +142,8 @@ import javax.annotation.Nullable;
  * cache and execution with spawn specific types.
  */
 public class RemoteExecutionService {
+  private final Reporter reporter;
+  private final boolean verboseFailures;
   private final Path execRoot;
   private final RemotePathResolver remotePathResolver;
   private final String buildRequestId;
@@ -135,7 +155,15 @@ public class RemoteExecutionService {
   private final ImmutableSet<PathFragment> filesToDownload;
   @Nullable private final Path captureCorruptedOutputsDir;
 
+  private final Scheduler scheduler;
+
+  private final AtomicBoolean shutdown = new AtomicBoolean(false);
+  private final AtomicBoolean buildInterrupted = new AtomicBoolean(false);
+
   public RemoteExecutionService(
+      Executor executor,
+      Reporter reporter,
+      boolean verboseFailures,
       Path execRoot,
       RemotePathResolver remotePathResolver,
       String buildRequestId,
@@ -146,6 +174,8 @@ public class RemoteExecutionService {
       @Nullable RemoteExecutionClient remoteExecutor,
       ImmutableSet<ActionInput> filesToDownload,
       @Nullable Path captureCorruptedOutputsDir) {
+    this.reporter = reporter;
+    this.verboseFailures = verboseFailures;
     this.execRoot = execRoot;
     this.remotePathResolver = remotePathResolver;
     this.buildRequestId = buildRequestId;
@@ -154,13 +184,14 @@ public class RemoteExecutionService {
     this.remoteOptions = remoteOptions;
     this.remoteCache = remoteCache;
     this.remoteExecutor = remoteExecutor;
-
     ImmutableSet.Builder<PathFragment> filesToDownloadBuilder = ImmutableSet.builder();
     for (ActionInput actionInput : filesToDownload) {
       filesToDownloadBuilder.add(actionInput.getExecPath());
     }
     this.filesToDownload = filesToDownloadBuilder.build();
     this.captureCorruptedOutputsDir = captureCorruptedOutputsDir;
+
+    this.scheduler = Schedulers.from(executor, /*interruptibleWorker=*/ true);
   }
 
   static Command buildCommand(
@@ -237,6 +268,11 @@ public class RemoteExecutionService {
 
     public RemoteActionExecutionContext getRemoteActionExecutionContext() {
       return remoteActionExecutionContext;
+    }
+
+    /** Returns the {@link ActionExecutionMetadata} that owns this action. */
+    public ActionExecutionMetadata getOwner() {
+      return spawn.getResourceOwner();
     }
 
     /**
@@ -358,7 +394,7 @@ public class RemoteExecutionService {
         TracingMetadataUtils.buildMetadata(
             buildRequestId, commandId, actionKey.getDigest().getHash(), spawn.getResourceOwner());
     RemoteActionExecutionContext remoteActionExecutionContext =
-        RemoteActionExecutionContext.createForSpawn(spawn, metadata);
+        RemoteActionExecutionContext.create(spawn, metadata);
 
     return new RemoteAction(
         spawn,
@@ -489,7 +525,6 @@ public class RemoteExecutionService {
       return Objects.hash(actionResult, executeResponse);
     }
   }
-
 
   /** Lookup the remote cache for the given {@link RemoteAction}. {@code null} if not found. */
   @Nullable
@@ -881,6 +916,7 @@ public class RemoteExecutionService {
   @Nullable
   public InMemoryOutput downloadOutputs(RemoteAction action, RemoteActionResult result)
       throws InterruptedException, IOException, ExecException {
+    checkState(!shutdown.get(), "shutdown");
     checkNotNull(remoteCache, "remoteCache can't be null");
 
     ActionResultMetadata metadata;
@@ -999,23 +1035,90 @@ public class RemoteExecutionService {
     return null;
   }
 
-  /** Upload outputs of a remote action which was executed locally to remote cache. */
-  public void uploadOutputs(RemoteAction action)
-      throws InterruptedException, IOException, ExecException {
-    checkState(shouldUploadLocalResults(action.spawn), "spawn shouldn't upload local result");
-
+  @VisibleForTesting
+  UploadManifest buildUploadManifest(RemoteAction action, SpawnResult spawnResult)
+      throws ExecException, IOException {
     Collection<Path> outputFiles =
         action.spawn.getOutputFiles().stream()
             .map((inp) -> execRoot.getRelative(inp.getExecPath()))
             .collect(ImmutableList.toImmutableList());
-    remoteCache.upload(
-        action.remoteActionExecutionContext,
+
+    return UploadManifest.create(
+        remoteOptions,
+        digestUtil,
         remotePathResolver,
         action.actionKey,
         action.action,
         action.command,
         outputFiles,
-        action.spawnExecutionContext.getFileOutErr());
+        action.spawnExecutionContext.getFileOutErr(),
+        /* exitCode= */ 0);
+  }
+
+  /** Upload outputs of a remote action which was executed locally to remote cache. */
+  public void uploadOutputs(RemoteAction action, SpawnResult spawnResult)
+      throws InterruptedException, ExecException {
+    checkState(!shutdown.get(), "shutdown");
+    checkState(shouldUploadLocalResults(action.spawn), "spawn shouldn't upload local result");
+    checkState(
+        SpawnResult.Status.SUCCESS.equals(spawnResult.status()) && spawnResult.exitCode() == 0,
+        "shouldn't upload outputs of failed local action");
+
+    try {
+      UploadManifest manifest = buildUploadManifest(action, spawnResult);
+      if (remoteOptions.remoteCacheAsync) {
+        Single.using(
+                remoteCache::retain,
+                remoteCache ->
+                    manifest.uploadAsync(action.getRemoteActionExecutionContext(), remoteCache),
+                RemoteCache::release)
+            .subscribeOn(scheduler)
+            .subscribe(
+                new SingleObserver<ActionResult>() {
+                  @Override
+                  public void onSubscribe(@NonNull Disposable d) {}
+
+                  @Override
+                  public void onSuccess(@NonNull ActionResult actionResult) {}
+
+                  @Override
+                  public void onError(@NonNull Throwable e) {
+                    reportUploadError(e);
+                  }
+                });
+      } else {
+        manifest.upload(action.getRemoteActionExecutionContext(), remoteCache);
+      }
+    } catch (IOException e) {
+      reportUploadError(e);
+    }
+  }
+
+  private void reportUploadError(Throwable error) {
+    if (buildInterrupted.get()) {
+      // If build interrupted, ignores all the errors
+      return;
+    }
+
+    String errorMessage;
+    if (error instanceof IOException) {
+      errorMessage = grpcAwareErrorMessage((IOException) error);
+    } else {
+      errorMessage = error.getMessage();
+    }
+
+    if (isNullOrEmpty(errorMessage)) {
+      errorMessage = error.getClass().getSimpleName();
+    }
+
+    if (verboseFailures) {
+      // On --verbose_failures print the whole stack trace
+      errorMessage += "\n" + getStackTraceAsString(error);
+    }
+
+    errorMessage = "Writing to Remote Cache: " + errorMessage;
+
+    reporter.handle(Event.warn(errorMessage));
   }
 
   /**
@@ -1023,8 +1126,9 @@ public class RemoteExecutionService {
    *
    * <p>Must be called before calling {@link #executeRemotely}.
    */
-  public void uploadInputsIfNotPresent(RemoteAction action)
+  public void uploadInputsIfNotPresent(RemoteAction action, boolean force)
       throws IOException, InterruptedException {
+    checkState(!shutdown.get(), "shutdown");
     checkState(mayBeExecutedRemotely(action.spawn), "spawn can't be executed remotely");
 
     RemoteExecutionCache remoteExecutionCache = (RemoteExecutionCache) remoteCache;
@@ -1033,7 +1137,7 @@ public class RemoteExecutionService {
     additionalInputs.put(action.actionKey.getDigest(), action.action);
     additionalInputs.put(action.commandHash, action.command);
     remoteExecutionCache.ensureInputsPresent(
-        action.remoteActionExecutionContext, action.merkleTree, additionalInputs);
+        action.remoteActionExecutionContext, action.merkleTree, additionalInputs, force);
   }
 
   /**
@@ -1045,6 +1149,7 @@ public class RemoteExecutionService {
   public RemoteActionResult executeRemotely(
       RemoteAction action, boolean acceptCachedResult, OperationObserver observer)
       throws IOException, InterruptedException {
+    checkState(!shutdown.get(), "shutdown");
     checkState(mayBeExecutedRemotely(action.spawn), "spawn can't be executed remotely");
 
     ExecuteRequest.Builder requestBuilder =
@@ -1079,6 +1184,7 @@ public class RemoteExecutionService {
   /** Downloads server logs from a remotely executed action if any. */
   public ServerLogs maybeDownloadServerLogs(RemoteAction action, ExecuteResponse resp, Path logDir)
       throws InterruptedException, IOException {
+    checkState(!shutdown.get(), "shutdown");
     checkNotNull(remoteCache, "remoteCache can't be null");
     ServerLogs serverLogs = new ServerLogs();
     serverLogs.directory = logDir.getRelative(action.getActionId());
@@ -1100,5 +1206,39 @@ public class RemoteExecutionService {
     }
 
     return serverLogs;
+  }
+
+  @Subscribe
+  public void onBuildInterrupted(BuildInterruptedEvent event) {
+    buildInterrupted.set(true);
+  }
+
+  /**
+   * Shuts the service down. Wait for active network I/O to finish but new requests are rejected.
+   */
+  public void shutdown() {
+    if (!shutdown.compareAndSet(false, true)) {
+      return;
+    }
+
+    if (buildInterrupted.get()) {
+      Thread.currentThread().interrupt();
+    }
+
+    if (remoteCache != null) {
+      remoteCache.release();
+
+      try {
+        remoteCache.awaitTermination();
+      } catch (InterruptedException e) {
+        buildInterrupted.set(true);
+        remoteCache.shutdownNow();
+        Thread.currentThread().interrupt();
+      }
+    }
+
+    if (remoteExecutor != null) {
+      remoteExecutor.close();
+    }
   }
 }

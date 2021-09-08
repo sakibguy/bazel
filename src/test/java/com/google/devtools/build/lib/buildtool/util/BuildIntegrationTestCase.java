@@ -20,6 +20,7 @@ import static com.google.common.base.Throwables.throwIfUnchecked;
 import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableList;
@@ -86,7 +87,9 @@ import com.google.devtools.build.lib.runtime.BlazeRuntime;
 import com.google.devtools.build.lib.runtime.BlazeServerStartupOptions;
 import com.google.devtools.build.lib.runtime.BlazeWorkspace;
 import com.google.devtools.build.lib.runtime.CommandEnvironment;
+import com.google.devtools.build.lib.runtime.NoSpawnCacheModule;
 import com.google.devtools.build.lib.runtime.WorkspaceBuilder;
+import com.google.devtools.build.lib.sandbox.SandboxModule;
 import com.google.devtools.build.lib.server.FailureDetails.FailureDetail;
 import com.google.devtools.build.lib.server.FailureDetails.Spawn;
 import com.google.devtools.build.lib.server.FailureDetails.Spawn.Code;
@@ -118,6 +121,7 @@ import com.google.devtools.build.lib.vfs.FileSystemUtils;
 import com.google.devtools.build.lib.vfs.Path;
 import com.google.devtools.build.lib.vfs.PathFragment;
 import com.google.devtools.build.lib.vfs.util.FileSystems;
+import com.google.devtools.build.lib.worker.WorkerModule;
 import com.google.devtools.common.options.OptionsBase;
 import com.google.devtools.common.options.OptionsParser;
 import java.io.IOException;
@@ -286,7 +290,20 @@ public abstract class BuildIntegrationTestCase {
     }
     LoggingUtil.installRemoteLoggerForTesting(null);
     testRoot.deleteTreesBelow(); // (comment out during debugging)
+    // Make sure that a test which crashes with on a bug report does not taint following ones with
+    // an unprocessed exception stored statically in BugReport.
+    BugReport.maybePropagateUnprocessedThrowableIfInTest();
     Thread.interrupted(); // If there was a crash in test case, main thread was interrupted.
+  }
+
+  /**
+   * Check and clear crash was reported in {@link BugReport}.
+   *
+   * <p>{@link BugReport} stores information about crashes in a static variable when running tests.
+   * Tests which deliberately cause crashes, need to clear that flag not to taint the environment.
+   */
+  protected static void assertAndClearBugReporterStoredCrash(Class<? extends Throwable> expected) {
+    assertThrows(expected, BugReport::maybePropagateUnprocessedThrowableIfInTest);
   }
 
   /**
@@ -470,6 +487,13 @@ public abstract class BuildIntegrationTestCase {
     if ("blaze".equals(TestConstants.PRODUCT_NAME)) {
       // include scanning isn't supported in bazel
       builder.addBlazeModule(new IncludeScanningModule());
+
+    } else {
+      // Add in modules implicitly added in internal integration test case.
+      builder
+          .addBlazeModule(new NoSpawnCacheModule())
+          .addBlazeModule(new WorkerModule())
+          .addBlazeModule(new SandboxModule());
     }
     return builder;
   }

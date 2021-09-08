@@ -22,8 +22,6 @@ import com.google.devtools.build.lib.events.Event;
 import com.google.devtools.build.lib.events.EventCollector;
 import com.google.devtools.build.lib.events.EventKind;
 import com.google.devtools.build.lib.packages.util.MockGenruleSupport;
-import com.google.devtools.build.lib.runtime.BlazeRuntime;
-import com.google.devtools.build.lib.runtime.NoSpawnCacheModule;
 import com.google.devtools.build.lib.shell.Command;
 import com.google.devtools.build.lib.vfs.Path;
 import java.io.ByteArrayOutputStream;
@@ -42,26 +40,8 @@ public class SubcommandEventTest extends BuildIntegrationTestCase {
   @Before
   public void stageEmbeddedTools() throws Exception {
     AnalysisMock.get().setupMockToolsRepository(mockToolsConfig);
-    // TODO(b/195130137): move these calls to somewhere common.
-    write("embedded_tools/tools/cpp/cc_configure.bzl", "def cc_configure(**kwargs):", "  pass");
-
-    write("embedded_tools/tools/sh/BUILD");
-    write("embedded_tools/tools/sh/sh_configure.bzl", "def sh_configure(**kwargs):", "  pass");
-    write("embedded_tools/tools/osx/BUILD");
-    write(
-        "embedded_tools/tools/osx/xcode_configure.bzl",
-        "def xcode_configure(*args, **kwargs):", // no positional arguments for XCode
-        "  pass");
-    write("embedded_tools/bin/sh", "def sh(**kwargs):", "  pass");
 
     addOptions("--spawn_strategy=standalone");
-  }
-
-  @Override
-  protected BlazeRuntime.Builder getRuntimeBuilder() throws Exception {
-    BlazeRuntime.Builder builder = super.getRuntimeBuilder();
-    builder.addBlazeModule(new NoSpawnCacheModule());
-    return builder;
   }
 
   @Test
