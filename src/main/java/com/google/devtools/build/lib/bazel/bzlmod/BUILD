@@ -44,6 +44,7 @@ java_library(
     name = "module_extension",
     srcs = [
         "ModuleExtension.java",
+        "ModuleExtensionId.java",
         "ModuleExtensionUsage.java",
         "Tag.java",
         "TagClass.java",
@@ -81,8 +82,9 @@ java_library(
 java_library(
     name = "resolution",
     srcs = [
+        "AbridgedModule.java",
         "ArchiveOverride.java",
-        "DiscoveryValue.java",
+        "BazelModuleResolutionValue.java",
         "GitOverride.java",
         "LocalPathOverride.java",
         "Module.java",
@@ -91,12 +93,10 @@ java_library(
         "MultipleVersionOverride.java",
         "NonRegistryOverride.java",
         "RegistryOverride.java",
-        "SelectionValue.java",
         "SingleVersionOverride.java",
     ],
     deps = [
         ":common",
-        ":exception",
         ":module_extension",
         ":registry",
         "//src/main/java/com/google/devtools/build/lib/cmdline",
@@ -104,7 +104,6 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/skyframe:sky_functions",
         "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/autocodec",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
-        "//src/main/protobuf:failure_details_java_proto",
         "//third_party:auto_value",
         "//third_party:guava",
         "//third_party:jsr305",
@@ -114,11 +113,12 @@ java_library(
 java_library(
     name = "resolution_impl",
     srcs = [
-        "DiscoveryFunction.java",
+        "BazelModuleResolutionFunction.java",
+        "Discovery.java",
         "ModuleExtensionContext.java",
         "ModuleFileFunction.java",
         "ModuleFileGlobals.java",
-        "SelectionFunction.java",
+        "Selection.java",
         "StarlarkBazelModule.java",
         "TypeCheckedTag.java",
     ],

@@ -21,7 +21,6 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.google.devtools.build.lib.cmdline.RepositoryMapping;
 import com.google.devtools.build.lib.cmdline.RepositoryName;
-import com.google.devtools.build.lib.server.FailureDetails.ExternalDeps.Code;
 import java.util.Map;
 import java.util.function.UnaryOperator;
 import javax.annotation.Nullable;
@@ -64,6 +63,10 @@ public abstract class Module {
    */
   public abstract ModuleKey getKey();
 
+  public final String getCanonicalRepoName() {
+    return getKey().getCanonicalRepoName();
+  }
+
   /**
    * The compatibility level of the module, which essentially signifies the "major version" of the
    * module in terms of SemVer.
@@ -71,118 +74,41 @@ public abstract class Module {
   public abstract int getCompatibilityLevel();
 
   /**
-   * Target patterns identifying execution platforms to register when this module is selected. Note
-   * that these are what was written in module files verbatim, and don't contain canonical repo
-   * names.
-   */
-  public abstract ImmutableList<String> getExecutionPlatformsToRegister();
-
-  /**
-   * Target patterns identifying toolchains to register when this module is selected. Note that
-   * these are what was written in module files verbatim, and don't contain canonical repo names.
-   */
-  public abstract ImmutableList<String> getToolchainsToRegister();
-
-  /**
-   * Target patterns (with canonical repo names) identifying execution platforms to register when
-   * this module is selected.
-   */
-  public final ImmutableList<String> getCanonicalizedExecutionPlatformsToRegister()
-      throws ExternalDepsException {
-    return canonicalizeTargetPatterns(getExecutionPlatformsToRegister());
-  }
-
-  /**
-   * Target patterns (with canonical repo names) identifying toolchains to register when this module
-   * is selected.
-   */
-  public final ImmutableList<String> getCanonicalizedToolchainsToRegister()
-      throws ExternalDepsException {
-    return canonicalizeTargetPatterns(getToolchainsToRegister());
-  }
-
-  /**
-   * Rewrites the given target patterns to have canonical repo names, assuming that they're
-   * originally written in the context of the module identified by {@code key} and {@code module}.
-   */
-  private ImmutableList<String> canonicalizeTargetPatterns(ImmutableList<String> targetPatterns)
-      throws ExternalDepsException {
-    ImmutableList.Builder<String> renamedPatterns = ImmutableList.builder();
-    for (String pattern : targetPatterns) {
-      if (!pattern.startsWith("@")) {
-        renamedPatterns.add("@" + getKey().getCanonicalRepoName() + pattern);
-        continue;
-      }
-      int doubleSlashIndex = pattern.indexOf("//");
-      if (doubleSlashIndex == -1) {
-        throw ExternalDepsException.withMessage(
-            Code.BAD_MODULE, "%s refers to malformed target pattern: %s", getKey(), pattern);
-      }
-      String repoName = pattern.substring(1, doubleSlashIndex);
-      ModuleKey depKey = getDeps().get(repoName);
-      if (depKey == null) {
-        throw ExternalDepsException.withMessage(
-            Code.BAD_MODULE,
-            "%s refers to target pattern %s with unknown repo %s",
-            getKey(),
-            pattern,
-            repoName);
-      }
-      renamedPatterns.add(
-          "@" + depKey.getCanonicalRepoName() + pattern.substring(doubleSlashIndex));
-    }
-    return renamedPatterns.build();
-  }
-
-  /**
    * The direct dependencies of this module. The key type is the repo name of the dep, and the value
    * type is the ModuleKey (name+version) of the dep.
    */
   public abstract ImmutableMap<String, ModuleKey> getDeps();
 
-  /**
-   * Used in {@link #getRepoMapping} to denote whether only repos from {@code bazel_dep}s should be
-   * returned, or repos from module extensions should also be returned.
-   */
-  public enum WhichRepoMappings {
-    BAZEL_DEPS_ONLY,
-    WITH_MODULE_EXTENSIONS_TOO
-  }
-
-  /** Returns the {@link RepositoryMapping} for the repo corresponding to this module. */
-  public final RepositoryMapping getRepoMapping(WhichRepoMappings whichRepoMappings) {
+  static RepositoryMapping getRepoMappingWithBazelDepsOnly(
+      ModuleKey key, String name, ImmutableMap<String, ModuleKey> deps) {
     ImmutableMap.Builder<RepositoryName, RepositoryName> mapping = ImmutableMap.builder();
     // If this is the root module, then the main repository should be visible as `@`.
-    if (getKey().equals(ModuleKey.ROOT)) {
+    if (key.equals(ModuleKey.ROOT)) {
       mapping.put(RepositoryName.MAIN, RepositoryName.MAIN);
     }
     // Every module should be able to reference itself as @<module name>.
     // If this is the root module, this perfectly falls into @<module name> => @
-    if (!getName().isEmpty()) {
+    if (!name.isEmpty()) {
       mapping.put(
-          RepositoryName.createFromValidStrippedName(getName()),
-          RepositoryName.createFromValidStrippedName(getKey().getCanonicalRepoName()));
+          RepositoryName.createFromValidStrippedName(name),
+          RepositoryName.createFromValidStrippedName(key.getCanonicalRepoName()));
     }
-    for (Map.Entry<String, ModuleKey> dep : getDeps().entrySet()) {
+    for (Map.Entry<String, ModuleKey> dep : deps.entrySet()) {
       // Special note: if `dep` is actually the root module, its ModuleKey would be ROOT whose
       // canonicalRepoName is the empty string. This perfectly maps to the main repo ("@").
       mapping.put(
           RepositoryName.createFromValidStrippedName(dep.getKey()),
           RepositoryName.createFromValidStrippedName(dep.getValue().getCanonicalRepoName()));
     }
-    if (whichRepoMappings.equals(WhichRepoMappings.WITH_MODULE_EXTENSIONS_TOO)) {
-      for (ModuleExtensionUsage usage : getExtensionUsages()) {
-        for (Map.Entry<String, String> entry : usage.getImports().entrySet()) {
-          // TODO(wyv): work out a rigorous canonical repo name format (and potentially a shorter
-          //   version when ambiguities aren't present).
-          String canonicalRepoName = usage.getExtensionName() + "." + entry.getValue();
-          mapping.put(
-              RepositoryName.createFromValidStrippedName(entry.getKey()),
-              RepositoryName.createFromValidStrippedName(canonicalRepoName));
-        }
-      }
-    }
-    return RepositoryMapping.create(mapping.build(), getKey().getCanonicalRepoName());
+    return RepositoryMapping.create(mapping.build(), key.getCanonicalRepoName());
+  }
+
+  /**
+   * Returns a {@link RepositoryMapping} with only Bazel module repos and no repos from module
+   * extensions. For the full mapping, see {@link BazelModuleResolutionValue#getFullRepoMappings}.
+   */
+  public final RepositoryMapping getRepoMappingWithBazelDepsOnly() {
+    return getRepoMappingWithBazelDepsOnly(getKey(), getName(), getDeps());
   }
 
   /**
@@ -204,9 +130,7 @@ public abstract class Module {
         .setName("")
         .setVersion(Version.EMPTY)
         .setKey(ModuleKey.ROOT)
-        .setCompatibilityLevel(0)
-        .setExecutionPlatformsToRegister(ImmutableList.of())
-        .setToolchainsToRegister(ImmutableList.of());
+        .setCompatibilityLevel(0);
   }
 
   /**
@@ -233,12 +157,6 @@ public abstract class Module {
 
     /** Optional; defaults to {@code 0}. */
     public abstract Builder setCompatibilityLevel(int value);
-
-    /** Optional; defaults to an empty list. */
-    public abstract Builder setExecutionPlatformsToRegister(ImmutableList<String> value);
-
-    /** Optional; defaults to an empty list. */
-    public abstract Builder setToolchainsToRegister(ImmutableList<String> value);
 
     public abstract Builder setDeps(ImmutableMap<String, ModuleKey> value);
 
