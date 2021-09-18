@@ -16,13 +16,17 @@ package com.google.devtools.build.lib.rules.cpp;
 
 import com.google.devtools.build.docgen.annot.DocCategory;
 import com.google.devtools.build.lib.actions.Artifact;
+import com.google.devtools.build.lib.analysis.TransitiveInfoCollection;
+import com.google.devtools.build.lib.analysis.configuredtargets.PackageGroupConfiguredTarget;
 import com.google.devtools.build.lib.analysis.starlark.StarlarkRuleContext;
 import com.google.devtools.build.lib.collect.nestedset.Depset;
+import com.google.devtools.build.lib.packages.Provider;
 import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.RuleErrorException;
 import net.starlark.java.annot.Param;
 import net.starlark.java.annot.StarlarkBuiltin;
 import net.starlark.java.annot.StarlarkMethod;
 import net.starlark.java.eval.EvalException;
+import net.starlark.java.eval.Sequence;
 import net.starlark.java.eval.StarlarkValue;
 
 /** Utility methods for Objc rules in Starlark Builtins */
@@ -68,5 +72,28 @@ public class CcStarlarkInternal implements StarlarkValue {
       })
   public CcStarlarkApiInfo createCcProvider(CcInfo ccInfo) {
     return new CcStarlarkApiInfo(ccInfo);
+  }
+
+  @StarlarkMethod(
+      name = "collect_native_cc_libraries",
+      documented = false,
+      parameters = {
+        @Param(name = "deps", positional = false, named = true),
+        @Param(name = "libraries_to_link", positional = false, named = true),
+      })
+  public CcNativeLibraryInfo collectNativeCcLibraries(Sequence<?> deps, Sequence<?> librariesToLink)
+      throws EvalException {
+    return CppHelper.collectNativeCcLibraries(
+        Sequence.cast(deps, TransitiveInfoCollection.class, "deps"),
+        Sequence.cast(librariesToLink, LibraryToLink.class, "libraries_to_link"));
+  }
+
+  @StarlarkMethod(
+      name = "PackageGroupInfo",
+      documented = false,
+      structField = true,
+      parameters = {})
+  public Provider getPackageGroupInfo() {
+    return PackageGroupConfiguredTarget.PROVIDER;
   }
 }
