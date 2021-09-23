@@ -156,6 +156,17 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   public boolean incompatibleEnableExportsProvider;
 
   @Option(
+      name = "experimental_existing_rules_immutable_view",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
+      effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS, OptionEffectTag.LOADING_AND_ANALYSIS},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help =
+          "If set to true, native.existing_rule and native.existing_rules return lightweight"
+              + " immutable view objects instead of mutable dicts.")
+  public boolean experimentalExistingRulesImmutableView;
+
+  @Option(
       name = "experimental_google_legacy_api",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
@@ -549,7 +560,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
 
   @Option(
       name = "incompatible_top_level_aspects_dependency",
-      defaultValue = "false",
+      defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
       metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
       effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
@@ -559,17 +570,6 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
               + " each aspect in the list will run independently and its required aspects will be"
               + " ignored.")
   public boolean incompatibleTopLevelAspectsDependOnAspects;
-
-  @Option(
-      name = "experimental_required_aspects",
-      defaultValue = "false",
-      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
-      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
-      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
-      help =
-          "If set to true, allows created aspect to require a list of aspects to be propagated"
-              + " before it.")
-  public boolean experimentalRequiredAspects;
 
   /**
    * An interner to reduce the number of StarlarkSemantics instances. A single Blaze instance should
@@ -592,6 +592,8 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
             .setBool(
                 EXPERIMENTAL_ENABLE_ANDROID_MIGRATION_APIS, experimentalEnableAndroidMigrationApis)
             .setBool(INCOMPATIBLE_ENABLE_EXPORTS_PROVIDER, incompatibleEnableExportsProvider)
+            .setBool(
+                EXPERIMENTAL_EXISTING_RULES_IMMUTABLE_VIEW, experimentalExistingRulesImmutableView)
             .setBool(EXPERIMENTAL_GOOGLE_LEGACY_API, experimentalGoogleLegacyApi)
             .setBool(EXPERIMENTAL_NINJA_ACTIONS, experimentalNinjaActions)
             .setBool(EXPERIMENTAL_PLATFORMS_API, experimentalPlatformsApi)
@@ -642,7 +644,6 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
             .setBool(
                 INCOMPATIBLE_TOP_LEVEL_ASPECTS_DEPENDENCY,
                 incompatibleTopLevelAspectsDependOnAspects)
-            .setBool(EXPERIMENTAL_REQUIRED_ASPECTS, experimentalRequiredAspects)
             .build();
     return INTERNER.intern(semantics);
   }
@@ -666,6 +667,8 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
       "-experimental_enable_android_migration_apis";
   public static final String INCOMPATIBLE_ENABLE_EXPORTS_PROVIDER =
       "-incompatible_enable_exports_provider";
+  public static final String EXPERIMENTAL_EXISTING_RULES_IMMUTABLE_VIEW =
+      "-experimental_existing_rules_immutable_view";
   public static final String EXPERIMENTAL_GOOGLE_LEGACY_API = "-experimental_google_legacy_api";
   public static final String EXPERIMENTAL_NINJA_ACTIONS = "-experimental_ninja_actions";
   public static final String EXPERIMENTAL_PLATFORMS_API = "-experimental_platforms_api";
@@ -715,8 +718,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   public static final String INCOMPATIBLE_TOP_LEVEL_ASPECTS_REQUIRE_PROVIDERS =
       "-incompatible_top_level_aspects_require_providers";
   public static final String INCOMPATIBLE_TOP_LEVEL_ASPECTS_DEPENDENCY =
-      "-incompatible_top_level_aspects_dependency";
-  public static final String EXPERIMENTAL_REQUIRED_ASPECTS = "-experimental_required_aspects";
+      "+incompatible_top_level_aspects_dependency";
 
   // non-booleans
   public static final StarlarkSemantics.Key<String> EXPERIMENTAL_BUILTINS_BZL_PATH =

@@ -32,15 +32,11 @@ def _build_variable_extensions(
     if hasattr(ctx.attr, "pch") and ctx.attr.pch != None:
         extensions["pch_file"] = ctx.file.pch.path
 
-    extensions["modules_cache_path"] = ctx.genfiles_dir.path + "/" + "_objc_module_cache"
+    if "MODULE_MAP_VARIABLES" in variable_categories:
+        extensions["modules_cache_path"] = ctx.genfiles_dir.path + "/" + "_objc_module_cache"
 
-    if "ARCHIVE_VARIABLE" in variable_categories:
+    if "ARCHIVE_VARIABLES" in variable_categories:
         extensions["obj_list_path"] = intermediate_artifacts.archive_obj_list.path
-
-    if arc_enabled:
-        extensions["objc_arc"] = ""
-    else:
-        extensions["no_objc_arc"] = ""
 
     if "FULLY_LINK_VARIABLES" in variable_categories:
         extensions["fully_linked_archive_path"] = fully_link_archive.path
@@ -60,6 +56,11 @@ def _build_variable_extensions(
         extensions["objc_library_exec_paths"] = exclusively_objc_libs
         extensions["cc_library_exec_paths"] = cc_libs.keys()
         extensions["imported_library_exec_paths"] = import_paths
+
+    if arc_enabled:
+        extensions["objc_arc"] = ""
+    else:
+        extensions["no_objc_arc"] = ""
 
     return extensions
 
@@ -180,7 +181,9 @@ def _compile(
     user_compile_flags.extend(_get_compile_rule_copts(common_variables))
     user_compile_flags.extend(common_variables.objc_config.copts_for_current_compilation_mode)
     user_compile_flags.extend(extra_compile_args)
-    user_compile_flags.extend(_paths_to_include_args(objc_compilation_context.strict_dependency_includes))
+    user_compile_flags.extend(
+        _paths_to_include_args(objc_compilation_context.strict_dependency_includes),
+    )
 
     textual_hdrs = []
     textual_hdrs.extend(objc_compilation_context.public_textual_hdrs)
@@ -216,7 +219,9 @@ def _compile(
 def _validate_attributes(common_variables):
     for include in common_variables.compilation_attributes.includes.to_list():
         if include.startswith("/"):
-            cc_helper.rule_error("The path '{}' is absolute, but only relative paths are allowed.".format(include))
+            cc_helper.rule_error(
+                "The path '{}' is absolute, but only relative paths are allowed.".format(include),
+            )
 
     ctx = common_variables.ctx
     if hasattr(ctx.attr, "srcs"):
@@ -232,7 +237,10 @@ def _validate_attributes(common_variables):
 
     if hasattr(ctx.attr, "module_name") and hasattr(ctx.attr, "module_map"):
         if ctx.attr.module_name != "" and ctx.attr.module_map != None:
-            cc_helper.attribute_error("module_name", "Specifying both module_name and module_map is invalid, please remove one of them.")
+            cc_helper.attribute_error(
+                "module_name",
+                "Specifying both module_name and module_map is invalid, please remove one of them.",
+            )
 
 def _get_compile_rule_copts(common_variables):
     attributes = common_variables.compilation_attributes
@@ -311,7 +319,7 @@ def _register_compile_and_archive_actions(
             priority_headers,
             "OBJC_ARCHIVE",
             obj_list,
-            ["ARCHIVE_VARIABLE"],
+            ["ARCHIVE_VARIABLES", "MODULE_MAP_VARIABLES"],
             generate_module_map_for_swift,
         )
 
@@ -327,7 +335,7 @@ def _register_compile_and_archive_actions(
             priority_headers,
             link_type = None,
             link_action_input = None,
-            variable_categories = [],
+            variable_categories = ["MODULE_MAP_VARIABLES"],
             generate_module_map_for_swift = generate_module_map_for_swift,
         )
 

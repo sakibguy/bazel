@@ -16,6 +16,7 @@ package com.google.devtools.build.lib.util;
 
 import static java.util.Map.Entry.comparingByKey;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Ordering;
 import com.google.devtools.build.lib.analysis.platform.PlatformInfo;
@@ -245,7 +246,8 @@ public class CommandFailureUtils {
    * Construct an error message that describes a failed command invocation. Currently this returns a
    * message of the form "error executing command foo bar baz".
    */
-  public static String describeCommandError(
+  @VisibleForTesting
+  static String describeCommandError(
       boolean verbose,
       Collection<String> commandLineElements,
       Map<String, String> env,
@@ -278,7 +280,7 @@ public class CommandFailureUtils {
       boolean verbose,
       Collection<String> commandLineElements,
       Map<String, String> env,
-      String cwd,
+      @Nullable String cwd,
       @Nullable PlatformInfo executionPlatform) {
 
     String commandName = commandLineElements.iterator().next();
@@ -287,5 +289,15 @@ public class CommandFailureUtils {
     return shortCommandName
         + " failed: "
         + describeCommandError(verbose, commandLineElements, env, cwd, executionPlatform);
+  }
+
+  public static String describeCommandFailure(
+      boolean verboseFailures, @Nullable String cwd, DescribableExecutionUnit command) {
+    return describeCommandFailure(
+        verboseFailures,
+        command.getArguments(),
+        command.getEnvironment(),
+        cwd,
+        command.getExecutionPlatform());
   }
 }

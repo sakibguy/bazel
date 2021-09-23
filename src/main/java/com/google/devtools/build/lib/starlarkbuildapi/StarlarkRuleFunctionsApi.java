@@ -357,6 +357,7 @@ public interface StarlarkRuleFunctionsApi<FileApiT extends FileApi> {
             named = true,
             defaultValue = "None",
             positional = false,
+            allowedTypes = {@ParamType(type = String.class), @ParamType(type = NoneType.class)},
             doc =
                 "The name of this rule, as understood by Bazel and reported in contexts such as"
                     + " logging, <code>native.existing_rule(...)[kind]</code>, and <code>bazel"
@@ -499,10 +500,8 @@ public interface StarlarkRuleFunctionsApi<FileApiT extends FileApi> {
             name = "requires",
             allowedTypes = {@ParamType(type = Sequence.class, generic1 = StarlarkAspectApi.class)},
             named = true,
-            enableOnlyWithFlag = BuildLanguageOptions.EXPERIMENTAL_REQUIRED_ASPECTS,
             defaultValue = "[]",
-            valueWhenDisabled = "[]",
-            doc = "(Experimental) List of aspects required to be propagated before this aspect."),
+            doc = "List of aspects required to be propagated before this aspect."),
         @Param(
             name = "fragments",
             allowedTypes = {@ParamType(type = Sequence.class, generic1 = String.class)},
