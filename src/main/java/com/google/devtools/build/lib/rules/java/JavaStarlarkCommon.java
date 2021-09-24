@@ -26,10 +26,12 @@ import com.google.devtools.build.lib.cmdline.Label;
 import com.google.devtools.build.lib.packages.BazelModuleContext;
 import com.google.devtools.build.lib.packages.Provider;
 import com.google.devtools.build.lib.rules.cpp.CcInfo;
+import com.google.devtools.build.lib.rules.java.JavaRuleOutputJarsProvider.JavaOutput;
 import com.google.devtools.build.lib.starlarkbuildapi.core.ProviderApi;
 import com.google.devtools.build.lib.starlarkbuildapi.java.JavaCommonApi;
 import com.google.devtools.build.lib.starlarkbuildapi.java.JavaToolchainStarlarkApiProviderApi;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import net.starlark.java.eval.EvalException;
 import net.starlark.java.eval.Module;
 import net.starlark.java.eval.Sequence;
@@ -80,6 +82,7 @@ public class JavaStarlarkCommon
       Sequence<?> resources, // <Artifact> expected
       Boolean neverlink,
       Boolean enableAnnotationProcessing,
+      Boolean enableCompileJarAction,
       StarlarkThread thread)
       throws EvalException, InterruptedException {
 
@@ -116,7 +119,9 @@ public class JavaStarlarkCommon
           Sequence.cast(exportedPlugins, JavaPluginInfo.class, "exported_plugins")
               .getImmutableList();
     }
-
+    if (!enableCompileJarAction) {
+      checkPrivateAccess(thread);
+    }
     return JavaInfoBuildHelper.getInstance()
         .createJavaCompileAction(
             starlarkRuleContext,
@@ -145,6 +150,7 @@ public class JavaStarlarkCommon
             Sequence.cast(resources, Artifact.class, "resources"),
             neverlink,
             enableAnnotationProcessing,
+            enableCompileJarAction,
             javaSemantics,
             thread);
   }
@@ -286,15 +292,51 @@ public class JavaStarlarkCommon
 
   @Override
   public String getTargetKind(Object target, StarlarkThread thread) throws EvalException {
+    checkPrivateAccess(thread);
+    if (target instanceof AbstractConfiguredTarget) {
+      return ((AbstractConfiguredTarget) target).getRuleClassString();
+    }
+    return "";
+  }
+
+  private static void checkPrivateAccess(StarlarkThread thread) throws EvalException {
     Label label =
         ((BazelModuleContext) Module.ofInnermostEnclosingStarlarkFunction(thread).getClientData())
             .label();
     if (!label.getPackageIdentifier().getRepository().toString().equals("@_builtins")) {
       throw Starlark.errorf("Rule in '%s' cannot use private API", label.getPackageName());
     }
-    if (target instanceof AbstractConfiguredTarget) {
-      return ((AbstractConfiguredTarget) target).getRuleClassString();
-    }
-    return "";
+  }
+
+  @Override
+  public JavaInfo toJavaBinaryInfo(JavaInfo javaInfo, StarlarkThread thread) throws EvalException {
+    checkPrivateAccess(thread);
+    JavaRuleOutputJarsProvider ruleOutputs =
+        JavaRuleOutputJarsProvider.builder()
+            .addJavaOutput(
+                javaInfo.getJavaOutputs().stream()
+                    .map(
+                        output ->
+                            JavaOutput.create(
+                                output.getClassJar(),
+                                null,
+                                null,
+                                output.getGeneratedClassJar(),
+                                output.getGeneratedSourceJar(),
+                                output.getNativeHeadersJar(),
+                                output.getManifestProto(),
+                                output.getJdeps(),
+                                output.getSourceJars()))
+                    .collect(Collectors.toList()))
+            .build();
+    return JavaInfo.Builder.create()
+        .addProvider(JavaCompilationInfoProvider.class, javaInfo.getCompilationInfoProvider())
+        .addProvider(JavaCcInfoProvider.class, javaInfo.getProvider(JavaCcInfoProvider.class))
+        .addProvider(JavaGenJarsProvider.class, javaInfo.getGenJarsProvider())
+        .addProvider(
+            JavaSourceJarsProvider.class, javaInfo.getProvider(JavaSourceJarsProvider.class))
+        .addProvider(JavaRuleOutputJarsProvider.class, ruleOutputs)
+        .addTransitiveOnlyRuntimeJars(javaInfo.getTransitiveOnlyRuntimeJars())
+        .build();
   }
 }

@@ -114,7 +114,7 @@ java_library(
         ":artifact_nested_set_function",
         ":artifact_nested_set_key",
         ":aspect_creation_exception",
-        ":aspect_value_key",
+        ":aspect_key_creator",
         ":build_configuration_value",
         ":build_info_collection_value",
         ":bzl_compile",
@@ -181,8 +181,6 @@ java_library(
         ":recursive_package_provider_backed_target_pattern_resolver",
         ":recursive_pkg_function",
         ":recursive_pkg_value",
-        ":repo_mapping_for_bzlmod_bzl_load_function",
-        ":repo_mapping_for_bzlmod_bzl_load_value",
         ":repository_mapping_function",
         ":repository_mapping_value",
         ":sane_analysis_exception",
@@ -884,8 +882,8 @@ java_library(
 )
 
 java_library(
-    name = "aspect_value_key",
-    srcs = ["AspectValueKey.java"],
+    name = "aspect_key_creator",
+    srcs = ["AspectKeyCreator.java"],
     deps = [
         ":build_configuration_value",
         ":configured_target_key",
@@ -1020,7 +1018,7 @@ java_library(
     name = "builder",
     srcs = ["Builder.java"],
     deps = [
-        ":aspect_value_key",
+        ":aspect_key_creator",
         ":configured_target_key",
         "//src/main/java/com/google/devtools/build/lib/actions",
         "//src/main/java/com/google/devtools/build/lib/actions:artifacts",
@@ -2283,33 +2281,6 @@ java_library(
 )
 
 java_library(
-    name = "repo_mapping_for_bzlmod_bzl_load_function",
-    srcs = ["RepoMappingForBzlmodBzlLoadFunction.java"],
-    deps = [
-        ":repo_mapping_for_bzlmod_bzl_load_value",
-        "//src/main/java/com/google/devtools/build/lib/bazel/bzlmod:common",
-        "//src/main/java/com/google/devtools/build/lib/bazel/bzlmod:resolution",
-        "//src/main/java/com/google/devtools/build/lib/cmdline:cmdline-primitives",
-        "//src/main/java/com/google/devtools/build/skyframe",
-        "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
-    ],
-)
-
-java_library(
-    name = "repo_mapping_for_bzlmod_bzl_load_value",
-    srcs = ["RepoMappingForBzlmodBzlLoadValue.java"],
-    deps = [
-        ":sky_functions",
-        "//src/main/java/com/google/devtools/build/lib/cmdline:cmdline-primitives",
-        "//src/main/java/com/google/devtools/build/lib/concurrent",
-        "//src/main/java/com/google/devtools/build/lib/skyframe/serialization/autocodec",
-        "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
-        "//third_party:auto_value",
-        "//third_party:guava",
-    ],
-)
-
-java_library(
     name = "repository_mapping_function",
     srcs = ["RepositoryMappingFunction.java"],
     deps = [
@@ -2703,7 +2674,7 @@ java_library(
         "//src/main/java/com/google/devtools/build/lib/events",
         "//src/main/java/com/google/devtools/build/lib/packages",
         "//src/main/java/com/google/devtools/build/lib/pkgcache",
-        "//src/main/java/com/google/devtools/build/lib/skyframe:aspect_value_key",
+        "//src/main/java/com/google/devtools/build/lib/skyframe:aspect_key_creator",
         "//src/main/java/com/google/devtools/build/skyframe",
         "//src/main/java/com/google/devtools/build/skyframe:skyframe-objects",
         "//third_party:guava",
