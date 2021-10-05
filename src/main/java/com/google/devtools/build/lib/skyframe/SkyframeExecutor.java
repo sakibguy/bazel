@@ -559,7 +559,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
     map.put(SkyFunctions.PACKAGE_ERROR, new PackageErrorFunction());
     map.put(SkyFunctions.PACKAGE_ERROR_MESSAGE, new PackageErrorMessageFunction());
     map.put(SkyFunctions.TARGET_PATTERN_ERROR, new TargetPatternErrorFunction());
-    map.put(TransitiveTargetKey.NAME, new TransitiveTargetFunction(ruleClassProvider));
+    map.put(TransitiveTargetKey.NAME, new TransitiveTargetFunction());
     map.put(Label.TRANSITIVE_TRAVERSAL, getTransitiveTraversalFunction());
     map.put(
         SkyFunctions.CONFIGURED_TARGET,
@@ -2059,7 +2059,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
       throws InvalidConfigurationException, InterruptedException {
     ConfigurationsResult.Builder builder = ConfigurationsResult.newBuilder();
 
-    FragmentClassSet allFragments = ruleClassProvider.getAllFragments();
+    FragmentClassSet allFragments = ruleClassProvider.getConfigurationFragments();
     PlatformMappingValue platformMappingValue = getPlatformMappingValue(eventHandler, fromOptions);
 
     // Now get the configurations.
@@ -2357,8 +2357,8 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
   /** Configures a given set of configured targets. */
   EvaluationResult<ActionLookupValue> configureTargets(
       ExtendedEventHandler eventHandler,
-      List<ConfiguredTargetKey> values,
-      ImmutableList<TopLevelAspectsKey> aspectKeys,
+      List<ConfiguredTargetKey> configuredTargetKeys,
+      ImmutableList<TopLevelAspectsKey> topLevelAspectKeys,
       boolean keepGoing,
       int numThreads,
       int cpuHeavySkyKeysThreadPoolSize)
@@ -2376,7 +2376,8 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
             .setEventHandler(eventHandler)
             .build();
     EvaluationResult<ActionLookupValue> result =
-        buildDriver.evaluate(Iterables.concat(values, aspectKeys), evaluationContext);
+        buildDriver.evaluate(
+            Iterables.concat(configuredTargetKeys, topLevelAspectKeys), evaluationContext);
     // Get rid of any memory retained by the cache -- all loading is done.
     perBuildSyscallCache.clear();
     return result;
