@@ -218,7 +218,8 @@ public class BuildViewForTesting {
         topLevelOptions,
         eventHandler,
         eventBus,
-        /*includeExecutionPhase=*/ false);
+        /*includeExecutionPhase=*/ false,
+        /*mergedPhasesExecutionJobsCount=*/ 0);
   }
 
   /** Sets the configurations. Not thread-safe. */
@@ -679,7 +680,7 @@ public class BuildViewForTesting {
                 PackageGroupContents.create(ImmutableList.of(PackageSpecification.everything()))))
         .setPrerequisites(ConfiguredTargetFactory.transformPrerequisiteMap(prerequisiteMap))
         .setConfigConditions(ConfigConditions.EMPTY)
-        .setUniversalFragments(ruleClassProvider.getUniversalFragments())
+        .setUniversalFragments(ruleClassProvider.getFragmentRegistry().getUniversalFragments())
         .setToolchainContexts(resolvedToolchainContext.build())
         .setExecGroupCollectionBuilder(execGroupCollectionBuilder)
         .setConstraintSemantics(ruleClassProvider.getConstraintSemantics())

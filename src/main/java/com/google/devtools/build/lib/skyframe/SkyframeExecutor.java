@@ -642,7 +642,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
     map.put(SkyFunctions.RESOLVED_FILE, new ResolvedFileFunction());
     map.put(
         SkyFunctions.PLATFORM_MAPPING,
-        new PlatformMappingFunction(ruleClassProvider.getConfigurationOptions()));
+        new PlatformMappingFunction(ruleClassProvider.getFragmentRegistry().getOptionsClasses()));
     map.put(
         SkyFunctions.ARTIFACT_NESTED_SET,
         ArtifactNestedSetFunction.createInstance(valueBasedChangePruningEnabled()));
@@ -2007,12 +2007,13 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
 
     // Prepare the Skyframe inputs.
     // TODO(gregce): support trimmed configs.
-    FragmentClassSet allFragments = ruleClassProvider.getConfigurationFragments();
+    FragmentClassSet allFragments = ruleClassProvider.getFragmentRegistry().getAllFragments();
 
     PlatformMappingValue platformMappingValue =
         getPlatformMappingValue(eventHandler, referenceBuildOptions);
 
-    ImmutableList.Builder<SkyKey> configSkyKeysBuilder = ImmutableList.builder();
+    ImmutableList.Builder<SkyKey> configSkyKeysBuilder =
+        ImmutableList.builderWithExpectedSize(optionsList.size());
     for (BuildOptions options : optionsList) {
       configSkyKeysBuilder.add(toConfigurationKey(platformMappingValue, allFragments, options));
     }
@@ -2059,7 +2060,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
       throws InvalidConfigurationException, InterruptedException {
     ConfigurationsResult.Builder builder = ConfigurationsResult.newBuilder();
 
-    FragmentClassSet allFragments = ruleClassProvider.getConfigurationFragments();
+    FragmentClassSet allFragments = ruleClassProvider.getFragmentRegistry().getAllFragments();
     PlatformMappingValue platformMappingValue = getPlatformMappingValue(eventHandler, fromOptions);
 
     // Now get the configurations.
@@ -2393,7 +2394,8 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
       List<BuildDriverKey> buildDriverAspectKeys,
       boolean keepGoing,
       int numThreads,
-      int cpuHeavySkyKeysThreadPoolSize)
+      int cpuHeavySkyKeysThreadPoolSize,
+      int mergedPhasesExecutionJobsCount)
       throws InterruptedException {
     checkActive();
 
@@ -2405,6 +2407,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
             .setExecutorServiceSupplier(
                 () -> NamedForkJoinPool.newNamedPool("skyframe-evaluator", numThreads))
             .setCPUHeavySkyKeysThreadPoolSize(cpuHeavySkyKeysThreadPoolSize)
+            .setExecutionPhaseThreadPoolSize(mergedPhasesExecutionJobsCount)
             .setEventHandler(eventHandler)
             .build();
     EvaluationResult<BuildDriverValue> result =
@@ -2491,7 +2494,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
    * no-keep_going evaluations) or indirectly by {@link #filterActionConflictsForTopLevelArtifacts}
    * in keep_going evaluations.
    */
-  public void resetActionConflictsStoredInSkyframe() {
+  void resetActionConflictsStoredInSkyframe() {
     memoizingEvaluator.delete(
         SkyFunctionName.functionIs(SkyFunctions.ACTION_LOOKUP_CONFLICT_FINDING));
   }
@@ -3030,7 +3033,7 @@ public abstract class SkyframeExecutor implements WalkableGraphFactory, Configur
       Set<String> multiCpu,
       Collection<Label> labels)
       throws InvalidConfigurationException, InterruptedException {
-    FragmentClassSet allFragments = ruleClassProvider.getConfigurationFragments();
+    FragmentClassSet allFragments = ruleClassProvider.getFragmentRegistry().getAllFragments();
     SkyKey key = PrepareAnalysisPhaseValue.key(allFragments, buildOptions, multiCpu, labels);
     EvaluationResult<PrepareAnalysisPhaseValue> evalResult =
         evaluate(

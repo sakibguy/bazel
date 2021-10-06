@@ -174,7 +174,13 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
   public void testRootModule() throws Exception {
     scratch.file(
         rootDirectory.getRelative("MODULE.bazel").getPathString(),
-        "module(name='A',version='0.1',compatibility_level=4)",
+        "module(",
+        "    name='A',",
+        "    version='0.1',",
+        "    compatibility_level=4,",
+        "    toolchains_to_register=['//my:toolchain', '//my:toolchain2'],",
+        "    execution_platforms_to_register=['//my:platform', '//my:platform2'],",
+        ")",
         "bazel_dep(name='B',version='1.0')",
         "bazel_dep(name='C',version='2.0',repo_name='see')",
         "single_version_override(module_name='D',version='18')",
@@ -197,6 +203,9 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
                 .setVersion(Version.parse("0.1"))
                 .setKey(ModuleKey.ROOT)
                 .setCompatibilityLevel(4)
+                .setExecutionPlatformsToRegister(
+                    ImmutableList.of("//my:platform", "//my:platform2"))
+                .setToolchainsToRegister(ImmutableList.of("//my:toolchain", "//my:toolchain2"))
                 .addDep("B", createModuleKey("B", "1.0"))
                 .addDep("see", createModuleKey("C", "2.0"))
                 .build());
@@ -502,11 +511,9 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
     SkyKey skyKey = ModuleFileValue.key(createModuleKey("mymod", "1.0"), null);
-    EvaluationResult<ModuleFileValue> result =
-        driver.evaluate(ImmutableList.of(skyKey), evaluationContext);
-    assertThat(result.hasError()).isTrue();
-    assertThat(result.getError().getException().getCause().toString())
-        .contains("this extension is already being used at");
+    reporter.removeHandler(failFastHandler); // expect failures
+    driver.evaluate(ImmutableList.of(skyKey), evaluationContext);
+    assertContainsEvent("this extension is already being used at");
   }
 
   @Test
@@ -522,11 +529,11 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
     SkyKey skyKey = ModuleFileValue.key(createModuleKey("mymod", "1.0"), null);
-    EvaluationResult<ModuleFileValue> result =
-        driver.evaluate(ImmutableList.of(skyKey), evaluationContext);
-    assertThat(result.hasError()).isTrue();
-    assertThat(result.getError().getException().getCause().toString())
-        .contains("The repo name 'mymod' is already being used as the current module name at");
+    reporter.removeHandler(failFastHandler); // expect failures
+    driver.evaluate(ImmutableList.of(skyKey), evaluationContext);
+
+    assertContainsEvent(
+        "The repo name 'mymod' is already being used as the current module name at");
   }
 
   @Test
@@ -542,12 +549,11 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
     ModuleFileFunction.REGISTRIES.set(differencer, ImmutableList.of(registry.getUrl()));
 
     SkyKey skyKey = ModuleFileValue.key(createModuleKey("mymod", "1.0"), null);
-    EvaluationResult<ModuleFileValue> result =
-        driver.evaluate(ImmutableList.of(skyKey), evaluationContext);
-    assertThat(result.hasError()).isTrue();
-    assertThat(result.getError().getException().getCause().toString())
-        .contains(
-            "The repo exported as 'some_repo' by module extension 'myext' is already imported at");
+    reporter.removeHandler(failFastHandler); // expect failures
+    driver.evaluate(ImmutableList.of(skyKey), evaluationContext);
+
+    assertContainsEvent(
+        "The repo exported as 'some_repo' by module extension 'myext' is already imported at");
   }
 
   @Test
@@ -568,11 +574,9 @@ public class ModuleFileFunctionTest extends FoundationTestCase {
         rootDirectory.getRelative("MODULE.bazel").getPathString(),
         "module(name='A',version='0.1',compatibility_level=\"4\")");
 
-    EvaluationResult<RootModuleFileValue> result =
-        driver.evaluate(ImmutableList.of(ModuleFileValue.KEY_FOR_ROOT_MODULE), evaluationContext);
-    assertThat(result.hasError()).isTrue();
-    assertThat(result.getError().getException())
-        .hasMessageThat()
-        .contains("parameter 'compatibility_level' got value of type 'string', want 'int'");
+    reporter.removeHandler(failFastHandler); // expect failures
+    driver.evaluate(ImmutableList.of(ModuleFileValue.KEY_FOR_ROOT_MODULE), evaluationContext);
+
+    assertContainsEvent("parameter 'compatibility_level' got value of type 'string', want 'int'");
   }
 }
