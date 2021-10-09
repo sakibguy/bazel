@@ -163,10 +163,12 @@ function __show_log() {
 function __pad() {
     local title=$1
     local pad=$2
+    # Ignore the subshell error -- `head` closes the fd before reading to the
+    # end, therefore the subshell will get SIGPIPE while stuck in `write`.
     {
         echo -n "$pad$pad $title "
         printf "%80s" " " | tr ' ' "$pad"
-    } | head -c 80
+    } | head -c 80 || true
     echo
 }
 
@@ -715,6 +717,11 @@ function run_suite() {
         set +o pipefail
         (
           set "${__opt_switch}" pipefail
+          # if errexit is enabled, make sure we run cleanup and collect the log.
+          if [[ "$-" = *e* ]]; then
+            set -E
+            trap __test_terminated_err ERR
+          fi
           timestamp >$TEST_TMPDIR/__ts_start
           testenv_set_up
           set_up

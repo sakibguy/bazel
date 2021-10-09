@@ -42,6 +42,7 @@ import com.google.devtools.build.lib.packages.StructImpl;
 import com.google.devtools.build.lib.packages.util.Crosstool.CcToolchainConfig;
 import com.google.devtools.build.lib.packages.util.MockCcSupport;
 import com.google.devtools.build.lib.packages.util.ResourceLoader;
+import com.google.devtools.build.lib.rules.cpp.CcLinkingContext.Linkstamp;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.ActionConfig;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.ArtifactNamePattern;
 import com.google.devtools.build.lib.rules.cpp.CcToolchainFeatures.EnvEntry;
@@ -1540,6 +1541,13 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
     Depset additionalInputs = info.getValue("additional_inputs", Depset.class);
     assertThat(additionalInputs.toList(Artifact.class).stream().map(Artifact::getFilename))
         .containsExactly("b.lds", "d.lds");
+    Depset linkstamps = info.getValue("linkstamps", Depset.class);
+    assertThat(
+            artifactsToStrings(
+                linkstamps.toList(Linkstamp.class).stream()
+                    .map(Linkstamp::getArtifact)
+                    .collect(ImmutableList.toImmutableList())))
+        .containsExactly("src a/linkstamp.cc");
     Collection<LibraryToLink> librariesToLink =
         info.getValue("libraries_to_link", Depset.class).toList(LibraryToLink.class);
     assertThat(
@@ -1627,6 +1635,7 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
         "cc_library(",
         "    name = 'dep1',",
         "    srcs = ['dep1.cc'],",
+        "    linkstamp = 'linkstamp.cc',",
         "    hdrs = ['dep1.h'],",
         "    linkopts = ['-DEP1_LINKOPT'],",
         ")",
@@ -1687,10 +1696,15 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
         "  merged_libraries = []",
         "  merged_additional_inputs = []",
         "  merged_user_link_flags = []",
+        "  merged_linkstamps = []",
         "  for l in merged_cc_info.linking_context.linker_inputs.to_list():",
         "      merged_libraries.extend(l.libraries)",
         "      merged_additional_inputs.extend(l.additional_inputs)",
         "      merged_user_link_flags.extend(l.user_link_flags)",
+        "      merged_linkstamps.extend(l.linkstamps)",
+        "  linkstamps_linker_input = cc_common.create_linker_input(",
+        "                   owner=ctx.label,",
+        "                   linkstamps=depset(merged_linkstamps))",
         "  return [",
         "     MyInfo(",
         "         info = struct(",
@@ -1698,6 +1712,7 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
         "             user_link_flags = merged_user_link_flags,",
         "             additional_inputs = depset(merged_additional_inputs),",
         "             libraries_to_link = depset(merged_libraries),",
+        "             linkstamps = depset(linkstamps_linker_input.linkstamps),",
         "             static_library = library_to_link.static_library,",
         "             pic_static_library = library_to_link.pic_static_library,",
         "             dynamic_library = library_to_link.dynamic_library,",
@@ -5465,7 +5480,7 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
     createFilesForTestingCompilation(
         scratch, "third_party/tools/build_defs/foo", "include_prefix='prefix'");
     scratch.file(
-        "bar/BUILD",
+        "third_party/bar/BUILD",
         "load('//third_party/tools/build_defs/foo:extension.bzl', 'cc_starlark_library')",
         "cc_starlark_library(",
         "    name = 'starlark_lib',",
@@ -5473,11 +5488,11 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
         "    public_hdrs = ['starlark_lib.h'],",
         "    private_hdrs = ['private_starlark_lib.h'],",
         ")");
-    ConfiguredTarget target = getConfiguredTarget("//bar:starlark_lib");
+    ConfiguredTarget target = getConfiguredTarget("//third_party/bar:starlark_lib");
     assertThat(target).isNotNull();
     CcInfo ccInfo = target.get(CcInfo.PROVIDER);
     assertThat(artifactsToStrings(ccInfo.getCcCompilationContext().getDirectPublicHdrs()))
-        .contains("bin bar/_virtual_includes/starlark_lib/prefix/starlark_lib.h");
+        .contains("bin third_party/bar/_virtual_includes/starlark_lib/prefix/starlark_lib.h");
   }
 
   @Test
@@ -5485,7 +5500,7 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
     createFilesForTestingCompilation(
         scratch, "third_party/tools/build_defs/foo", "strip_include_prefix='v1'");
     scratch.file(
-        "bar/BUILD",
+        "third_party/bar/BUILD",
         "load('//third_party/tools/build_defs/foo:extension.bzl', 'cc_starlark_library')",
         "cc_starlark_library(",
         "    name = 'starlark_lib',",
@@ -5493,11 +5508,11 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
         "    public_hdrs = ['v1/starlark_lib.h'],",
         "    private_hdrs = ['v1/private_starlark_lib.h'],",
         ")");
-    ConfiguredTarget target = getConfiguredTarget("//bar:starlark_lib");
+    ConfiguredTarget target = getConfiguredTarget("//third_party/bar:starlark_lib");
     assertThat(target).isNotNull();
     CcInfo ccInfo = target.get(CcInfo.PROVIDER);
     assertThat(artifactsToStrings(ccInfo.getCcCompilationContext().getDirectPublicHdrs()))
-        .contains("bin bar/_virtual_includes/starlark_lib/starlark_lib.h");
+        .contains("bin third_party/bar/_virtual_includes/starlark_lib/starlark_lib.h");
   }
 
   @Test
@@ -5507,7 +5522,7 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
         "third_party/tools/build_defs/foo",
         "strip_include_prefix='v1', include_prefix='prefix'");
     scratch.file(
-        "bar/BUILD",
+        "third_party/bar/BUILD",
         "load('//third_party/tools/build_defs/foo:extension.bzl', 'cc_starlark_library')",
         "cc_starlark_library(",
         "    name = 'starlark_lib',",
@@ -5515,11 +5530,11 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
         "    public_hdrs = ['v1/starlark_lib.h'],",
         "    private_hdrs = ['v1/private_starlark_lib.h'],",
         ")");
-    ConfiguredTarget target = getConfiguredTarget("//bar:starlark_lib");
+    ConfiguredTarget target = getConfiguredTarget("//third_party/bar:starlark_lib");
     assertThat(target).isNotNull();
     CcInfo ccInfo = target.get(CcInfo.PROVIDER);
     assertThat(artifactsToStrings(ccInfo.getCcCompilationContext().getDirectPublicHdrs()))
-        .contains("bin bar/_virtual_includes/starlark_lib/prefix/starlark_lib.h");
+        .contains("bin third_party/bar/_virtual_includes/starlark_lib/prefix/starlark_lib.h");
   }
 
   @Test
@@ -5667,27 +5682,6 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
   @Test
   public void testTreeArtifactPublicHdrs() throws Exception {
     doTestTreeAtrifactInSrcsAndHdrs("public_hdrs");
-  }
-
-  @Test
-  public void testWrongSrcsExtensionGivesError() throws Exception {
-    doTestWrongExtensionOfSrcsAndHdrs("srcs");
-  }
-
-  @Test
-  public void testWrongSrcExtensionGivesError() throws Exception {
-    createFiles(scratch, "tools/build_defs/foo");
-
-    scratch.file(
-        "bar/BUILD",
-        "load('//tools/build_defs/foo:extension.bzl', 'cc_starlark_library')",
-        "cc_starlark_library(",
-        "    name = 'starlark_lib',",
-        "    srcs = ['starlark_lib.qweqwe'],",
-        ")");
-    reporter.removeHandler(failFastHandler);
-    getConfiguredTarget("//bar:starlark_lib");
-    assertContainsEvent("The list of possible extensions for 'srcs'");
   }
 
   private static void createFilesForTestingCompilation(
@@ -6165,21 +6159,6 @@ public class StarlarkCcCommonTest extends BuildViewTestCase {
         "    'dep': attr.label(),",
         "  }",
         ")");
-  }
-
-  private void doTestWrongExtensionOfSrcsAndHdrs(String attrName) throws Exception {
-    createFiles(scratch, "tools/build_defs/foo");
-    scratch.file(
-        "bar/BUILD",
-        "load('//tools/build_defs/foo:extension.bzl', 'cc_starlark_library')",
-        "cc_starlark_library(",
-        "    name = 'starlark_lib',",
-        "    " + attrName + " = ['starlark_lib.cannotpossiblybevalid'],",
-        ")");
-    reporter.removeHandler(failFastHandler);
-    getConfiguredTarget("//bar:starlark_lib");
-    assertContainsEvent(
-        "has wrong extension. The list of possible extensions for '" + attrName + "'");
   }
 
   private void doTestPossibleExtensionsOfSrcsAndHdrs(String attrName, List<String> extensions)

@@ -237,6 +237,73 @@ run_suite "errexit tests"
     result.assertLogMessage(r"./thing.sh:[0-9]*: in call to helper")
     result.assertLogMessage(r"./thing.sh:[0-9]*: in call to test_errexit")
 
+  def test_set_bash_errexit_prints_stack_trace(self):
+    self.write_file(
+        "thing.sh", """
+set -euo pipefail
+
+function helper() {
+  echo before
+  false
+  echo after
+}
+
+function test_failure_in_helper() {
+  helper
+}
+
+run_suite "bash errexit tests"
+""")
+
+    result = self.execute_test("thing.sh")
+    result.assertNotSuccess("bash errexit tests")
+    result.assertTestFailed("test_failure_in_helper")
+    result.assertLogMessage(r"./thing.sh:\d*: in call to helper")
+    result.assertLogMessage(
+        r"./thing.sh:\d*: in call to test_failure_in_helper")
+
+  def test_set_bash_errexit_runs_tear_down(self):
+    self.write_file(
+        "thing.sh", """
+set -euo pipefail
+
+function tear_down() {
+  echo "Running tear_down"
+}
+
+function testenv_tear_down() {
+  echo "Running testenv_tear_down"
+}
+
+function test_failure_in_helper() {
+  wrong_command
+}
+
+run_suite "bash errexit tests"
+""")
+
+    result = self.execute_test("thing.sh")
+    result.assertNotSuccess("bash errexit tests")
+    result.assertTestFailed("test_failure_in_helper")
+    result.assertLogMessage("Running tear_down")
+    result.assertLogMessage("Running testenv_tear_down")
+
+  def test_set_bash_errexit_pipefail_long_testname_succeeds(self):
+    test_name = "x" * 1000
+    self.write_file(
+        "thing.sh", """
+set -euo pipefail
+
+function test_%s() {
+  :
+}
+
+run_suite "bash errexit tests"
+""" % test_name)
+
+    result = self.execute_test("thing.sh")
+    result.assertSuccess("bash errexit tests")
+
   def test_empty_test_fails(self):
     self.write_file("thing.sh", """
 # No tests present.
