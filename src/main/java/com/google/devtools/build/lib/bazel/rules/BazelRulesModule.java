@@ -301,6 +301,14 @@ public final class BazelRulesModule extends BlazeModule {
             "The --legacy_spawn_scheduler flag is a no-op and will be removed soon.",
         help = "Was used to enable the old spawn scheduler. Now a no-op.")
     public boolean legacySpawnScheduler;
+
+    @Option(
+        name = "experimental_multi_threaded_digest",
+        defaultValue = "true",
+        documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+        effectTags = {OptionEffectTag.UNKNOWN},
+        help = "No-op")
+    public boolean experimentalMultiThreadedDigest;
   }
 
   /** This is where deprecated Bazel-specific options only used by the build command go to die. */
@@ -470,6 +478,15 @@ public final class BazelRulesModule extends BlazeModule {
         documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
         help = "No-op")
     public TriState enableTracerCompression;
+
+    @Option(
+        name = "experimental_profile_cpu_usage",
+        defaultValue = "true",
+        effectTags = {OptionEffectTag.NO_OP},
+        metadataTags = {OptionMetadataTag.DEPRECATED, OptionMetadataTag.EXPERIMENTAL},
+        documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
+        help = "No-op")
+    public boolean enableCpuUsageProfiling;
   }
 
   @Override
