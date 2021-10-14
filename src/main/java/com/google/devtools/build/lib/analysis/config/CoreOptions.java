@@ -69,6 +69,16 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
   public boolean mergeGenfilesDirectory;
 
   @Option(
+      name = "experimental_platform_in_output_dir",
+      defaultValue = "false",
+      documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
+      effectTags = {OptionEffectTag.AFFECTS_OUTPUTS},
+      metadataTags = {OptionMetadataTag.EXPERIMENTAL},
+      help =
+          "If true, the target platform is used in the output directory name instead of the CPU.")
+  public boolean platformInOutputDir;
+
+  @Option(
       name = "incompatible_use_platforms_repo_for_constraints",
       defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.OUTPUT_PARAMETERS,
@@ -248,7 +258,7 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
 
   @Option(
       name = "experimental_enable_aspect_hints",
-      defaultValue = "true",
+      defaultValue = "false",
       documentationCategory = OptionDocumentationCategory.UNDOCUMENTED,
       effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
       metadataTags = {OptionMetadataTag.EXPERIMENTAL})
@@ -840,6 +850,7 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
     host.commandLineBuildVariables = commandLineBuildVariables;
     host.enforceConstraints = enforceConstraints;
     host.mergeGenfilesDirectory = mergeGenfilesDirectory;
+    host.platformInOutputDir = platformInOutputDir;
     host.cpu = hostCpu;
     host.includeRequiredConfigFragmentsProvider = includeRequiredConfigFragmentsProvider;
 
@@ -878,6 +889,8 @@ public class CoreOptions extends FragmentOptions implements Cloneable {
 
     // Pass archived tree artifacts filter.
     host.archivedArtifactsMnemonicsFilter = archivedArtifactsMnemonicsFilter;
+
+    host.enableAspectHints = enableAspectHints;
 
     return host;
   }
