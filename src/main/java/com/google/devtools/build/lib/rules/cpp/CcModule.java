@@ -46,6 +46,7 @@ import com.google.devtools.build.lib.packages.RuleClass.ConfiguredTargetFactory.
 import com.google.devtools.build.lib.packages.StarlarkInfo;
 import com.google.devtools.build.lib.packages.TargetUtils;
 import com.google.devtools.build.lib.packages.semantics.BuildLanguageOptions;
+import com.google.devtools.build.lib.rules.cpp.CcBinary.CcLauncherInfo;
 import com.google.devtools.build.lib.rules.cpp.CcCompilationHelper.CompilationInfo;
 import com.google.devtools.build.lib.rules.cpp.CcCompilationHelper.SourceCategory;
 import com.google.devtools.build.lib.rules.cpp.CcLinkingContext.LinkOptions;
@@ -68,6 +69,7 @@ import com.google.devtools.build.lib.rules.cpp.CppActionConfigs.CppPlatform;
 import com.google.devtools.build.lib.rules.cpp.CppConfiguration.HeadersCheckingMode;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkTargetType;
 import com.google.devtools.build.lib.rules.cpp.Link.LinkingMode;
+import com.google.devtools.build.lib.starlarkbuildapi.core.ProviderApi;
 import com.google.devtools.build.lib.starlarkbuildapi.cpp.CcModuleApi;
 import com.google.devtools.build.lib.util.FileTypeSet;
 import com.google.devtools.build.lib.util.Pair;
@@ -794,6 +796,39 @@ public abstract class CcModule
             Sequence.cast(compilationContexts, CcCompilationContext.class, "compilation_contexts"),
             ImmutableList.of())
         .build();
+  }
+
+  @Override
+  public Sequence<Artifact> getBuildInfo(StarlarkRuleContext ruleContext, StarlarkThread thread)
+      throws EvalException, InterruptedException {
+    checkPrivateStarlarkificationAllowlist(thread);
+    return StarlarkList.immutableCopyOf(
+        ruleContext.getRuleContext().getBuildInfo(CppBuildInfo.KEY));
+  }
+
+  @Override
+  public ProviderApi getCcLauncherInfoProvider(StarlarkThread thread) throws EvalException {
+    checkPrivateStarlarkificationAllowlist(thread);
+    return CcLauncherInfo.PROVIDER;
+  }
+
+  @Override
+  public void createStripAction(
+      StarlarkRuleContext ctx,
+      CcToolchainProvider toolchain,
+      Artifact input,
+      Artifact output,
+      FeatureConfigurationForStarlark featureConfig,
+      StarlarkThread thread)
+      throws EvalException, RuleErrorException {
+    checkPrivateStarlarkificationAllowlist(thread);
+    CppHelper.createStripAction(
+        ctx.getRuleContext(),
+        toolchain,
+        ctx.getRuleContext().getFragment(CppConfiguration.class),
+        input,
+        output,
+        featureConfig.getFeatureConfiguration());
   }
 
   private static NestedSet<Artifact> toNestedSetOfArtifacts(Object obj, String fieldName)
@@ -1882,7 +1917,7 @@ public abstract class CcModule
     }
   }
 
-  private static boolean isBuiltIn(StarlarkThread thread) {
+  public static boolean isBuiltIn(StarlarkThread thread) {
     Label label =
         ((BazelModuleContext) Module.ofInnermostEnclosingStarlarkFunction(thread).getClientData())
             .label();
