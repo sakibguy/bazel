@@ -516,12 +516,12 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
 
   @Option(
       name = "incompatible_java_common_parameters",
-      defaultValue = "false",
+      defaultValue = "true",
       documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
       effectTags = {OptionEffectTag.BUILD_FILE_SEMANTICS},
       metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
       help =
-          "If set to true, the jar_file, and host_javabase parameters in pack_sources and "
+          "If set to true, the output_jar, and host_javabase parameters in pack_sources and "
               + "host_javabase in compile will all be removed.")
   public boolean incompatibleJavaCommonParameters;
 
@@ -556,19 +556,6 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
               + " top level targets whose rules' advertised providers satisfy the required"
               + " providers of the aspect.")
   public boolean incompatibleTopLevelAspectsRequireProviders;
-
-  @Option(
-      name = "incompatible_top_level_aspects_dependency",
-      defaultValue = "true",
-      documentationCategory = OptionDocumentationCategory.STARLARK_SEMANTICS,
-      metadataTags = {OptionMetadataTag.INCOMPATIBLE_CHANGE},
-      effectTags = {OptionEffectTag.LOADING_AND_ANALYSIS},
-      help =
-          "If set to true, a dependency between the top level aspects will be built based on their"
-              + " required aspect providers, advertised providers and required aspects. Otherwise,"
-              + " each aspect in the list will run independently and its required aspects will be"
-              + " ignored.")
-  public boolean incompatibleTopLevelAspectsDependOnAspects;
 
   /**
    * An interner to reduce the number of StarlarkSemantics instances. A single Blaze instance should
@@ -639,9 +626,6 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
             .setBool(
                 INCOMPATIBLE_TOP_LEVEL_ASPECTS_REQUIRE_PROVIDERS,
                 incompatibleTopLevelAspectsRequireProviders)
-            .setBool(
-                INCOMPATIBLE_TOP_LEVEL_ASPECTS_DEPENDENCY,
-                incompatibleTopLevelAspectsDependOnAspects)
             .build();
     return INTERNER.intern(semantics);
   }
@@ -691,7 +675,7 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
   public static final String INCOMPATIBLE_DO_NOT_SPLIT_LINKING_CMDLINE =
       "+incompatible_do_not_split_linking_cmdline";
   public static final String INCOMPATIBLE_JAVA_COMMON_PARAMETERS =
-      "-incompatible_java_common_parameters";
+      "+incompatible_java_common_parameters";
   public static final String INCOMPATIBLE_LINKOPTS_TO_LINKLIBS =
       "+incompatible_linkopts_to_linklibs";
   public static final String INCOMPATIBLE_NEW_ACTIONS_API = "+incompatible_new_actions_api";
@@ -714,8 +698,6 @@ public class BuildLanguageOptions extends OptionsBase implements Serializable {
       "-incompatible_visibility_private_attributes_at_definition";
   public static final String INCOMPATIBLE_TOP_LEVEL_ASPECTS_REQUIRE_PROVIDERS =
       "-incompatible_top_level_aspects_require_providers";
-  public static final String INCOMPATIBLE_TOP_LEVEL_ASPECTS_DEPENDENCY =
-      "+incompatible_top_level_aspects_dependency";
 
   // non-booleans
   public static final StarlarkSemantics.Key<String> EXPERIMENTAL_BUILTINS_BZL_PATH =
