@@ -52,12 +52,12 @@ import com.google.devtools.build.lib.packages.ExecGroup;
 import com.google.devtools.build.lib.packages.InputFile;
 import com.google.devtools.build.lib.packages.OutputFile;
 import com.google.devtools.build.lib.packages.PackageGroup;
+import com.google.devtools.build.lib.packages.PackageGroupsRuleVisibility;
 import com.google.devtools.build.lib.packages.Rule;
 import com.google.devtools.build.lib.packages.RuleClass;
 import com.google.devtools.build.lib.packages.RuleTransitionData;
 import com.google.devtools.build.lib.packages.Target;
 import com.google.devtools.build.lib.packages.Type;
-import com.google.devtools.build.lib.skyframe.ToolchainContextKey;
 import com.google.devtools.build.lib.util.OrderedSetMultimap;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -123,7 +123,7 @@ public abstract class DependencyResolver {
     abstract ImmutableList<Aspect> getPropagatingAspects();
 
     @Nullable
-    abstract ToolchainContextKey getToolchainContextKey();
+    abstract Label getExecutionPlatformLabel();
 
     /** A Builder to create instances of PartiallyResolvedDependency. */
     @AutoValue.Builder
@@ -134,7 +134,7 @@ public abstract class DependencyResolver {
 
       abstract Builder setPropagatingAspects(List<Aspect> propagatingAspects);
 
-      abstract Builder setToolchainContextKey(@Nullable ToolchainContextKey toolchainContextKey);
+      abstract Builder setExecutionPlatformLabel(@Nullable Label executionPlatformLabel);
 
       abstract PartiallyResolvedDependency build();
     }
@@ -147,7 +147,7 @@ public abstract class DependencyResolver {
     public DependencyKey.Builder getDependencyKeyBuilder() {
       return DependencyKey.builder()
           .setLabel(getLabel())
-          .setToolchainContextKey(getToolchainContextKey());
+          .setExecutionPlatformLabel(getExecutionPlatformLabel());
     }
   }
 
@@ -163,7 +163,7 @@ public abstract class DependencyResolver {
    * <p>The values are not simply labels because this also implements the first step of applying
    * configuration transitions, namely, split transitions. This needs to be done before the labels
    * are resolved because late bound attributes depend on the configuration. A good example for this
-   * is @{code :cc_toolchain}.
+   * is {@code :cc_toolchain}.
    *
    * <p>The long-term goal is that most configuration transitions be applied here. However, in order
    * to do that, we first have to eliminate transitions that depend on the rule class of the
@@ -219,7 +219,7 @@ public abstract class DependencyResolver {
    *
    * <p>This also implements the first step of applying configuration transitions, namely, split
    * transitions. This needs to be done before the labels are resolved because late bound attributes
-   * depend on the configuration. A good example for this is @{code :cc_toolchain}.
+   * depend on the configuration. A good example for this is {@code :cc_toolchain}.
    *
    * <p>The long-term goal is that most configuration transitions be applied here. However, in order
    * to do that, we first have to eliminate transitions that depend on the rule class of the
@@ -281,6 +281,11 @@ public abstract class DependencyResolver {
       return OrderedSetMultimap.create();
     }
 
+    // This check makes sure that visibility labels actually refer to package groups.
+    if (fromRule != null) {
+      checkPackageGroupVisibility(fromRule, targetMap);
+    }
+
     OrderedSetMultimap<DependencyKind, PartiallyResolvedDependency> partiallyResolvedDeps =
         partiallyResolveDependencies(
             config,
@@ -340,7 +345,7 @@ public abstract class DependencyResolver {
               PartiallyResolvedDependency.builder()
                   .setLabel(toLabel)
                   .setTransition(NoTransition.INSTANCE)
-                  .setToolchainContextKey(toolchainContext.key())
+                  .setExecutionPlatformLabel(toolchainContext.executionPlatform().label())
                   .build());
         } else {
           // Legacy approach: use a HostTransition.
@@ -845,6 +850,22 @@ public abstract class DependencyResolver {
       TargetAndConfiguration node, OrderedSetMultimap<DependencyKind, Label> outgoingLabels) {
     Target target = node.getTarget();
     outgoingLabels.putAll(VISIBILITY_DEPENDENCY, target.getVisibility().getDependencyLabels());
+  }
+
+  private void checkPackageGroupVisibility(Rule fromRule, Map<Label, Target> targetMap)
+      throws Failure {
+    if (!(fromRule.getVisibility() instanceof PackageGroupsRuleVisibility)) {
+      return;
+    }
+
+    for (Label label : fromRule.getVisibility().getDependencyLabels()) {
+      if (targetMap.get(label) != null
+          && !targetMap.get(label).getTargetKind().equals(PackageGroup.targetKind())) {
+        throw new Failure(
+            fromRule.getLocation(),
+            String.format("Label '%s' does not refer to a package group.", label));
+      }
+    }
   }
 
   /**
